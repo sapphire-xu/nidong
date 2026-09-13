@@ -35,7 +35,7 @@ function withSettingDefaults(s: AppSettings): AppSettings {
     autoHide: s.autoHide !== false,
     autoHideHotkey: s.autoHideHotkey !== false,
     autoHideHover: s.autoHideHover !== false,
-    revealHotkey: s.revealHotkey || "Tab+Q",
+    revealHotkey: s.revealHotkey === "Tab+Q" || !s.revealHotkey ? "Ctrl+Q" : s.revealHotkey,
     classRemind: s.classRemind !== false,
     classRemindMinutes: Math.max(1, Math.floor(Number(s.classRemindMinutes) || 15)),
   };
@@ -250,9 +250,10 @@ export default function App() {
       settingsHydrated.current = true;
       return;
     }
+    const delay = settings.rememberPassword === false ? 0 : 400;
     const t = window.setTimeout(() => {
       api.saveSettings(settings).catch((e) => setErr(String(e)));
-    }, 400);
+    }, delay);
     return () => window.clearTimeout(t);
   }, [settings]);
 
@@ -709,7 +710,6 @@ export default function App() {
         return;
       }
       pinBeforeOverlay.current = null;
-      setPinned(false);
       setView("main");
       expand(false);
     };
@@ -983,7 +983,7 @@ export default function App() {
       <button
         type="button"
         className={`icon-btn pin ${pinned ? "on" : ""}`}
-        title={pinned ? "取消钉住 (Esc)" : "钉住"}
+        title={pinned ? "取消钉住" : "钉住"}
         onClick={(e) => {
           e.stopPropagation();
           togglePin();
@@ -1288,7 +1288,7 @@ export default function App() {
           </div>
           <div className="about-doc">
             <div className="about-name">泥洞</div>
-            <div className="about-ver">v1.0.0</div>
+            <div className="about-ver">v1.0.1</div>
             <p>东北大学桌面看板，致力于解决官方平台不便捷的问题。</p>
             <p className="about-meta">作者 sapphire_fic</p>
           </div>
@@ -1482,7 +1482,10 @@ export default function App() {
           <div className="toggle" onClick={() => {
             const next = !remember;
             setRemember(next);
-            if (!next) setAutoLogin(false);
+            if (!next) {
+              setAutoLogin(false);
+              setPass("");
+            }
             if (settings) setSettings({ ...settings, rememberPassword: next, autoLogin: next && autoLogin });
           }}>
             <span>记住密码</span><div className={`sw ${remember ? "on" : ""}`}><i /></div>
@@ -1497,7 +1500,7 @@ export default function App() {
           </div>
           <button className="primary" disabled={busy} onClick={doLogin}>{busy ? "登录中…" : "进入泥洞"}</button>
           {err ? <div className="err-inline">{err}</div> : null}
-          <div className="hint">勾选后密码存进这台电脑的系统凭据，下次打开会自动填入。退出登录不会清掉已记住的密码。</div>
+          <div className="hint">勾选后密码存进这台电脑的系统凭据，下次打开会自动填入。关掉「记住密码」会删掉已存的密码。退出登录不会清。</div>
         </div>
       )}
 
@@ -1581,6 +1584,7 @@ export default function App() {
           setSettings={(next) => {
             setRemember(next.rememberPassword !== false);
             setAutoLogin(!!next.autoLogin && next.rememberPassword !== false);
+            if (next.rememberPassword === false) setPass("");
             setSettings(withSettingDefaults(next));
           }}
           semester={snap?.semester}

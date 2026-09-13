@@ -79,10 +79,15 @@ struct PendingLogin {
 
 fn load_settings(dir: &PathBuf) -> AppSettings {
     let p = dir.join("settings.json");
-    fs::read(&p)
+    let mut s: AppSettings = fs::read(&p)
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if s.reveal_hotkey.eq_ignore_ascii_case("tab+q") {
+        s.reveal_hotkey = "Ctrl+Q".into();
+        save_settings_file(dir, &s);
+    }
+    s
 }
 
 fn save_settings_file(dir: &PathBuf, s: &AppSettings) {
@@ -260,8 +265,14 @@ fn save_settings(state: State<AppState>, mut settings: AppSettings) -> Result<Ap
         }
         if !settings.remember_password {
             settings.auto_login = false;
+            let extra = state.snapshot.lock().unwrap().username.clone();
             if !settings.last_username.is_empty() {
                 keyring_delete(&settings.last_username);
+            }
+            if let Some(u) = extra {
+                if !u.is_empty() && u != settings.last_username {
+                    keyring_delete(&u);
+                }
             }
         }
         crate::hotkey::update(&settings);

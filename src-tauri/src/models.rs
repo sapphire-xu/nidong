@@ -219,7 +219,7 @@ fn default_elec_warn() -> f64 {
 }
 
 fn default_reveal_hotkey() -> String {
-    "Tab+Q".into()
+    "Ctrl+Q".into()
 }
 
 fn default_remind_minutes() -> u32 {

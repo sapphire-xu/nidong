@@ -1,5 +1,5 @@
-//! 全局快捷键（默认 Tab+Q）与悬停热区。
-//! Windows 用低层键盘钩子：Tab 不是 RegisterHotKey 能用的修饰键。
+//! 全局快捷键（默认 Ctrl+Q）与悬停热区。
+//! Windows 用低层键盘钩子：自定义组合可能含 Tab，RegisterHotKey 接不住。
 //! 钩子里只记录按键，真正弹窗放到独立线程 / 主线程，避免在钩子回调里调窗口 API。
 
 use crate::models::AppSettings;

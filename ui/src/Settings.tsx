@@ -275,7 +275,7 @@ function HotkeyField({ value, onChange }: { value: string; onChange: (v: string)
       className={`hotkey-btn ${capturing ? "capturing" : ""}`}
       onClick={() => setCapturing((v) => !v)}
     >
-      {capturing ? "按下组合键…" : (value || "Tab+Q").replace(/\+/g, " + ")}
+      {capturing ? "按下组合键…" : (value || "Ctrl+Q").replace(/\+/g, " + ")}
     </button>
   );
 }
@@ -409,7 +409,7 @@ export function SettingsPanel(props: {
             <span>开机自启</span>
             <div className={`sw ${s.autostart ? "on" : ""}`}><i /></div>
           </div>
-          <p className="hint">密码只进这台电脑的系统凭据。退出登录不会清掉已记住的密码。</p>
+          <p className="hint">密码只进这台电脑的系统凭据。关掉「记住密码」会从系统凭据里删掉已存的密码。退出登录不会清。</p>
         </div>
       )}
 
@@ -432,7 +432,7 @@ export function SettingsPanel(props: {
                   <div className="hotkey-row">
                     <span>组合键</span>
                     <HotkeyField
-                      value={s.revealHotkey || "Tab+Q"}
+                      value={s.revealHotkey || "Ctrl+Q"}
                       onChange={(revealHotkey) => set({ revealHotkey })}
                     />
                   </div>

@@ -1,6 +1,6 @@
 [package]
 name = "nidong"
-version = "1.0.0"
+version = "1.0.1"
 description = "东北大学桌面小看板"
 authors = ["sapphire_fic"]
 edition = "2021"
