@@ -22,7 +22,7 @@
 
 ## 安装（Windows）
 
-需要 64 位 Windows。从 [Releases](https://github.com/sapphire-xu/nidong/releases) 下载 `泥洞_1.0.0_x64-setup.exe`，按中文安装向导完成。
+需要 64 位 Windows。从 [Releases](https://github.com/sapphire-xu/nidong/releases) 下载 `nidong_1.0.0_x64-setup.exe`，按中文安装向导完成。装好后开始菜单里的名字是「泥洞」。
 
 安装后开始菜单或桌面打开「泥洞」。通知区会有托盘图标。
 
@@ -99,7 +99,7 @@ npm run build
 npx tauri build
 ```
 
-产物在 `src-tauri/target/release/bundle/nsis/泥洞_1.0.0_x64-setup.exe`。
+产物在 `src-tauri/target/release/bundle/nsis/泥洞_1.0.0_x64-setup.exe`。GitHub Release 里的文件名是 `nidong_1.0.0_x64-setup.exe`（同一份安装包）。
 
 测上课提醒可以把「现在」拨到开课前：`scripts\set-now.bat`，测完 `scripts\clear-now.bat`。说明见 [docs/给AI.md](docs/给AI.md)。
 
