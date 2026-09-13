@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>泥洞 · 原型</title>
+  <style>
+    :root, [data-theme="light"] {
+      --bg-island: rgba(244, 247, 251, 0.88);
+      --bg-raised: #ffffff;
+      --ink: #1a2433;
+      --ink-dim: #5c6b80;
+      --neu-blue: #0b3a82;
+      --neu-blue-deep: #07285c;
+      --warn: #c45a12;
+      --danger: #b42318;
+      --ok: #1f7a4d;
+      --stroke: rgba(10, 30, 60, 0.10);
+      --glow: 0 8px 28px rgba(11, 58, 130, 0.12);
+      --bar-muted: color-mix(in srgb, var(--neu-blue) 38%, transparent);
+      --desktop: #d8e0ec;
+      --desktop-2: #c5d0e0;
+      --proto-bg: rgba(255, 255, 255, 0.72);
+      --captcha-bg: #e8eef6;
+    }
+    [data-theme="dark"] {
+      --bg-island: rgba(18, 22, 28, 0.78);
+      --bg-raised: #1c222c;
+      --ink: #e8eef6;
+      --ink-dim: #93a1b5;
+      --neu-blue: #6fa2ff;
+      --neu-blue-deep: #3d6fd4;
+      --warn: #f0a35a;
+      --danger: #ff7a72;
+      --ok: #5bd49a;
+      --stroke: rgba(255, 255, 255, 0.10);
+      --glow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      --bar-muted: color-mix(in srgb, var(--neu-blue) 55%, transparent);
+      --desktop: #0c1016;
+      --desktop-2: #1a2433;
+      --proto-bg: rgba(16, 20, 28, 0.82);
+      --captcha-bg: #12161c;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 500px at 50% -10%, var(--desktop-2), transparent 60%),
+        var(--desktop);
+      overflow: hidden;
+      user-select: none;
+    }
+    button, input { font: inherit; color: inherit; }
+    .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+    /* —— 桌面暗示 —— */
+    .wallpaper-hint {
+      position: absolute;
+      inset: 80px 48px 96px;
+      border-radius: 12px;
+      border: 1px solid var(--stroke);
+      opacity: 0.28;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg, transparent 0 28px, var(--stroke) 28px 29px, transparent 29px),
+        repeating-linear-gradient(180deg, transparent 0 22px, var(--stroke) 22px 23px);
+    }
+
+    /* —— 岛 —— */
+    .island-wrap {
+      position: absolute;
+      top: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 420px;
+      filter: drop-shadow(var(--glow));
+      z-index: 2;
+      transition: transform 220ms ease;
+    }
+    .island-wrap.shift-left { transform: translateX(calc(-50% - 48px)); }
+    .island-wrap.shift-right { transform: translateX(calc(-50% + 48px)); }
+    .island {
+      background: var(--bg-island);
+      backdrop-filter: blur(28px) saturate(1.4);
+      -webkit-backdrop-filter: blur(28px) saturate(1.4);
+      border: 1px solid var(--stroke);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+      overflow: hidden;
+      transition: border-radius 220ms ease, height 220ms ease;
+    }
+    .island.collapsed {
+      height: 40px;
+      border-radius: 20px;
+      box-shadow: none;
+      filter: none;
+    }
+    .island.expanded {
+      min-height: 40px;
+      border-radius: 0 0 20px 20px;
+    }
+    .collapsed-row {
+      height: 40px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 14px;
+    }
+    .logo {
+      width: 18px; height: 18px; border-radius: 6px;
+      background: var(--neu-blue);
+      color: #fff;
+      font-size: 11px; font-weight: 650;
+      display: grid; place-items: center;
+      flex: none;
+    }
+    [data-theme="dark"] .logo { color: #0b1220; }
+    .collapsed-row .mid {
+      flex: 1; min-width: 0;
+      font-size: 13px; font-weight: 560;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .collapsed-row .aux {
+      font-size: 12px; color: var(--ink-dim); flex: none;
+    }
+    .dot {
+      width: 6px; height: 6px; border-radius: 50%; flex: none;
+    }
+    .dot.blue { background: var(--neu-blue); box-shadow: 0 0 0 0 var(--neu-blue); animation: breathe 2.2s ease-in-out infinite; }
+    .dot.warn { background: var(--warn); }
+    @keyframes breathe {
+      50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--neu-blue) 28%, transparent); }
+    }
+
+    .panel { padding: 0 16px 14px; }
+    .topbar {
+      height: 44px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .topbar h1 { font-size: 15px; font-weight: 650; margin: 0; letter-spacing: 0.02em; }
+    .week { flex: 1; text-align: center; font-size: 12px; color: var(--ink-dim); }
+    .icon-btn {
+      width: 28px; height: 28px; border: 0; background: transparent;
+      border-radius: 8px; color: var(--ink-dim); cursor: pointer;
+      display: grid; place-items: center;
+    }
+    .icon-btn:hover { background: var(--stroke); color: var(--ink); }
+    .icon-btn svg { width: 16px; height: 16px; }
+
+    .cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .card {
+      background: var(--bg-raised);
+      border: 1px solid var(--stroke);
+      border-radius: 14px;
+      padding: 10px 10px 8px;
+      min-height: 86px;
+    }
+    .card.clickable { cursor: pointer; }
+    .card.clickable:hover { border-color: color-mix(in srgb, var(--neu-blue) 45%, var(--stroke)); }
+    .card.warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--stroke)); }
+    .card .k { font-size: 11px; color: var(--ink-dim); }
+    .card .v { font-size: 20px; font-weight: 650; letter-spacing: -0.03em; margin-top: 2px; line-height: 1.15; }
+    .card .u { font-size: 11px; color: var(--ink-dim); }
+    .card .u.warn { color: var(--warn); font-weight: 560; }
+    .mini {
+      display: flex; align-items: flex-end; gap: 2px;
+      height: 16px; margin-top: 8px;
+    }
+    .mini i {
+      flex: 1; display: block; border-radius: 1px 1px 0 0;
+      background: var(--bar-muted); min-height: 0;
+    }
+    .mini i.today { background: var(--neu-blue); }
+
+    .sec-title {
+      margin: 14px 0 8px;
+      font-size: 12px; font-weight: 560; color: var(--ink-dim);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .text-btn {
+      border: 0; background: transparent; cursor: pointer;
+      color: var(--neu-blue); font-size: 12px; padding: 0;
+    }
+    .course {
+      background: var(--bg-raised);
+      border: 1px solid var(--stroke);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .row {
+      padding: 10px 12px;
+      border-top: 1px solid var(--stroke);
+    }
+    .row:first-child { border-top: 0; }
+    .row.past { opacity: 0.48; }
+    .row.now { box-shadow: inset 3px 0 0 var(--neu-blue); }
+    .row.next { background: color-mix(in srgb, var(--neu-blue) 7%, transparent); }
+    .when { font-size: 11px; color: var(--ink-dim); display: flex; justify-content: space-between; }
+    .cname { font-size: 13px; font-weight: 560; margin-top: 2px; display: flex; justify-content: space-between; gap: 8px; }
+    .place { color: var(--ink-dim); font-weight: 400; font-size: 12px; }
+    .empty, .err {
+      border-radius: 12px; padding: 18px 14px; text-align: center;
+      font-size: 13px; color: var(--ink-dim);
+      background: var(--bg-raised); border: 1px solid var(--stroke);
+    }
+    .err { color: var(--ink); }
+    .retry {
+      margin-top: 10px; border: 0; background: var(--neu-blue); color: #fff;
+      border-radius: 10px; padding: 6px 14px; cursor: pointer; font-size: 12px;
+    }
+    [data-theme="dark"] .retry { color: #0b1220; }
+
+    .foot {
+      margin-top: 12px;
+      font-size: 11px; color: var(--ink-dim);
+    }
+
+    /* —— 账单 —— */
+    .bill-head {
+      height: 40px; display: flex; align-items: center; gap: 4px;
+    }
+    .back {
+      border: 0; background: transparent; cursor: pointer;
+      display: flex; align-items: center; gap: 4px;
+      color: var(--ink); font-size: 14px; font-weight: 560; padding: 4px 6px 4px 0;
+    }
+    .seg {
+      margin-left: auto; display: flex; background: var(--stroke);
+      border-radius: 8px; padding: 2px;
+    }
+    .seg button {
+      border: 0; background: transparent; cursor: pointer;
+      font-size: 11px; padding: 4px 8px; border-radius: 6px; color: var(--ink-dim);
+    }
+    .seg button.on { background: var(--bg-raised); color: var(--ink); font-weight: 560; }
+    .month-nav {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 2px;
+      font-size: 13px; font-weight: 560;
+    }
+    .month-nav button {
+      width: 24px; height: 24px; border: 0; background: transparent;
+      color: var(--ink); cursor: pointer; border-radius: 6px;
+    }
+    .month-nav button:hover:not(:disabled) { background: var(--stroke); }
+    .month-nav button:disabled { opacity: 0.28; cursor: default; }
+    .col.future { cursor: default; }
+
+    .metrics {
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+      margin: 4px 0 10px;
+    }
+    .metrics .k { font-size: 11px; color: var(--ink-dim); }
+    .metrics .v { font-size: 16px; font-weight: 650; letter-spacing: -0.03em; margin-top: 2px; }
+
+    .chart-block { position: relative; }
+    .chart {
+      display: flex; align-items: flex-end; gap: 3px;
+      height: 120px; padding-top: 10px;
+      border-bottom: 1px solid var(--stroke);
+    }
+    .col {
+      flex: 1; min-width: 0; height: 100%;
+      display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
+      cursor: pointer;
+    }
+    .bar {
+      width: 100%;
+      border-radius: 3px 3px 0 0;
+      background: var(--bar-muted);
+      position: relative;
+    }
+    .range-7 .bar { max-width: 36px; }
+    .bar.today, .bar.sel { background: var(--neu-blue); }
+    .bar.sel::after {
+      content: "";
+      position: absolute; top: -7px; left: 50%; transform: translateX(-50%);
+      width: 4px; height: 4px; border-radius: 50%; background: var(--neu-blue);
+    }
+    .xaxis {
+      display: flex; justify-content: space-between;
+      font-size: 10px; color: var(--ink-dim); margin-top: 6px;
+    }
+    .tip {
+      position: absolute; left: 50%; bottom: 132px;
+      transform: translateX(-50%);
+      background: var(--bg-raised);
+      border: 1px solid var(--stroke);
+      color: var(--ink);
+      font-size: 11px;
+      padding: 5px 8px; border-radius: 8px;
+      white-space: nowrap;
+      pointer-events: none;
+      box-shadow: var(--glow);
+      z-index: 3;
+    }
+
+    .day-title {
+      margin-top: 12px;
+      font-size: 12px; font-weight: 560;
+    }
+    .bills {
+      margin-top: 8px; max-height: 168px; overflow: auto;
+      border: 1px solid var(--stroke); border-radius: 12px;
+      background: var(--bg-raised);
+    }
+    .bills::-webkit-scrollbar { width: 8px; }
+    .bill {
+      display: flex; align-items: baseline; gap: 8px;
+      padding: 9px 12px;
+      border-top: 1px solid var(--stroke);
+      font-size: 13px;
+    }
+    .bill:first-child { border-top: 0; }
+    .bill .t { color: var(--ink-dim); font-size: 11px; width: 40px; flex: none; }
+    .bill .s { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bill .a { font-weight: 560; }
+    .bill .a.neg { color: var(--ink); }
+    .bill .a.pos { color: var(--ok); }
+    .bill-empty { padding: 20px 12px; text-align: center; font-size: 13px; color: var(--ink-dim); }
+
+    /* —— 表单 —— */
+    label { display: block; font-size: 12px; color: var(--ink-dim); margin: 10px 0 6px; }
+    input[type="text"], input[type="password"] {
+      width: 100%; height: 36px; border-radius: 10px;
+      border: 1px solid var(--stroke); background: var(--bg-raised);
+      padding: 0 10px; outline: none;
+    }
+    input:focus { border-color: var(--neu-blue); }
+    .primary {
+      width: 100%; height: 38px; margin-top: 16px; border: 0; cursor: pointer;
+      border-radius: 12px; background: var(--neu-blue); color: #fff; font-weight: 560;
+    }
+    [data-theme="dark"] .primary { color: #0b1220; }
+    .ghost {
+      width: 100%; margin-top: 8px; border: 0; background: transparent;
+      color: var(--ink-dim); cursor: pointer; font-size: 12px;
+    }
+    .hint { font-size: 11px; color: var(--ink-dim); margin-top: 10px; }
+    .sms-row { display: flex; gap: 8px; align-items: center; }
+    .captcha {
+      width: 108px; height: 36px; border-radius: 8px; flex: none;
+      background: var(--captcha-bg);
+      display: grid; place-items: center;
+      letter-spacing: 0.28em; font-weight: 700; font-style: italic;
+      border: 1px solid var(--stroke); cursor: pointer;
+    }
+    .toggle {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 0; border-top: 1px solid var(--stroke); font-size: 13px;
+    }
+    .sw {
+      width: 36px; height: 20px; border-radius: 4px; background: var(--stroke); position: relative;
+    }
+    .sw.on { background: var(--neu-blue); }
+    .sw i {
+      position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+      border-radius: 3px; background: #fff;
+    }
+    .sw.on i { left: 18px; }
+    .group { margin-top: 8px; }
+    .group h3 { font-size: 11px; color: var(--ink-dim); font-weight: 560; margin: 14px 0 4px; }
+    .cache-line {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 10px 0; border-top: 1px solid var(--stroke); font-size: 13px;
+    }
+    .link {
+      border: 0; background: transparent; color: var(--neu-blue);
+      cursor: pointer; font-size: 12px; padding: 0; white-space: nowrap;
+    }
+    .link:hover { text-decoration: underline; }
+    .ocr-ok { font-size: 11px; color: var(--ok); margin-top: 6px; }
+
+    .collapsed-row, .topbar, .bill-head { cursor: grab; }
+    .collapsed-row button, .topbar button, .bill-head button, .text-btn { cursor: pointer; }
+
+    .tt {
+      display: grid;
+      grid-template-columns: 54px repeat(7, 1fr);
+      gap: 2px;
+      font-size: 10px;
+      position: relative;
+    }
+    .tt .h {
+      text-align: center; color: var(--ink-dim); padding: 6px 0; border-radius: 6px;
+    }
+    .tt .p {
+      color: var(--ink-dim); font-size: 9px; display: flex; flex-direction: column;
+      justify-content: center; align-items: center; text-align: center; line-height: 1.2;
+    }
+    .tt .p small { font-size: 8px; opacity: 0.85; }
+    .tt .cell {
+      background: color-mix(in srgb, var(--neu-blue) 16%, var(--bg-raised));
+      border-radius: 4px; padding: 5px 3px; min-height: 30px;
+      overflow: hidden; line-height: 1.25; cursor: default;
+      font-weight: 560; font-size: 10px;
+    }
+    .tt .cell.empty { background: transparent; }
+
+    /* —— 原型台 —— */
+    .proto {
+      position: absolute; left: 16px; right: 16px; bottom: 12px;
+      background: var(--proto-bg);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--stroke);
+      border-radius: 14px;
+      padding: 10px 12px;
+      z-index: 5;
+      display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    }
+    .proto b { font-size: 12px; margin-right: 6px; }
+    .proto button {
+      border: 1px solid var(--stroke); background: transparent;
+      border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer; color: var(--ink-dim);
+    }
+    .proto button.on { border-color: var(--neu-blue); color: var(--neu-blue); background: color-mix(in srgb, var(--neu-blue) 12%, transparent); }
+    .proto .sp { width: 1px; height: 16px; background: var(--stroke); margin: 0 4px; }
+  </style>
+</head>
+<body>
+  <div class="wallpaper-hint"></div>
+  <div class="island-wrap">
+    <div class="island" id="island"></div>
+  </div>
+
+  <div class="proto">
+    <b>原型台</b>
+    <button data-scene="collapsed">收起</button>
+    <button data-scene="class">上课中</button>
+    <button data-scene="warn">警告</button>
+    <button data-scene="out">未登录</button>
+    <span class="sp"></span>
+    <button data-scene="main" class="on">展开</button>
+    <button data-scene="noclass">无课</button>
+    <button data-scene="offcampus">校外失败</button>
+    <button data-scene="noschedule">未出课表</button>
+    <span class="sp"></span>
+    <button data-scene="bills">账单</button>
+    <button data-scene="bills-empty">账单空</button>
+    <button data-scene="bills-fail">账单失败</button>
+    <button data-scene="semester">学期课表</button>
+    <span class="sp"></span>
+    <button data-scene="login">登录</button>
+    <button data-scene="sms">二次验证</button>
+    <button data-scene="settings">设置</button>
+    <span class="sp"></span>
+    <button id="themeBtn">浅色</button>
+  </div>
+
+  <script>
+    const TODAY = "2026-09-07";
+    const WEEK = ["日", "一", "二", "三", "四", "五", "六"];
+    const fmt = (n) => n.toFixed(2);
+    const pad = (n) => String(n).padStart(2, "0");
+
+    const SPEND = {
+      "2026-07-03": 16.20, "2026-07-06": 22.00, "2026-07-10": 18.40,
+      "2026-07-15": 27.50, "2026-07-16": 14.00, "2026-07-20": 31.20,
+      "2026-07-23": 9.80,  "2026-07-28": 19.00,
+      "2026-08-01": 9.00,  "2026-08-03": 28.00, "2026-08-04": 22.50,
+      "2026-08-05": 19.00, "2026-08-06": 31.00, "2026-08-07": 16.80,
+      "2026-08-08": 7.20,
+      "2026-08-09": 8.50, "2026-08-10": 32.40, "2026-08-11": 28.00,
+      "2026-08-12": 15.20, "2026-08-13": 31.80, "2026-08-14": 22.00,
+      "2026-08-15": 0,     "2026-08-16": 5.00,  "2026-08-17": 29.50,
+      "2026-08-18": 18.40, "2026-08-19": 33.20, "2026-08-20": 12.00,
+      "2026-08-21": 27.60, "2026-08-22": 14.80, "2026-08-23": 0,
+      "2026-08-24": 30.10, "2026-08-25": 19.50, "2026-08-26": 24.00,
+      "2026-08-27": 35.80, "2026-08-28": 16.20, "2026-08-29": 8.00,
+      "2026-08-30": 0,     "2026-08-31": 28.40, "2026-09-01": 21.00,
+      "2026-09-02": 17.50, "2026-09-03": 18.40, "2026-09-04": 26.00,
+      "2026-09-05": 11.20, "2026-09-06": 4.50,  "2026-09-07": 12.50,
+    };
+    const RECHARGE = { "2026-08-25": 100 };
+
+    const BILLS = {
+      "2026-09-07": [
+        { t: "07:38", s: "浴池", a: -2.00 },
+        { t: "11:32", s: "一食堂一楼", a: -10.00 },
+        { t: "11:40", s: "开水", a: -0.50 },
+      ],
+      "2026-09-03": [
+        { t: "07:50", s: "物美超市", a: -2.40 },
+        { t: "11:20", s: "二食堂", a: -12.00 },
+        { t: "17:45", s: "奶茶", a: -4.00 },
+      ],
+      "2026-08-25": [
+        { t: "12:10", s: "一食堂", a: -15.50 },
+        { t: "12:22", s: "水果店", a: -4.00 },
+        { t: "18:01", s: "银行转账", a: 100.00 },
+      ],
+      "2026-08-27": [
+        { t: "07:40", s: "豆浆油条", a: -3.50 },
+        { t: "11:30", s: "一食堂", a: -16.00 },
+        { t: "17:40", s: "三食堂", a: -14.30 },
+        { t: "21:10", s: "校园超市", a: -2.00 },
+      ],
+    };
+
+    function daysOfMonth(y, m) {
+      const last = new Date(y, m, 0).getDate();
+      const today = new Date(TODAY + "T00:00:00");
+      const out = [];
+      for (let i = 1; i <= last; i++) {
+        const d = new Date(y, m - 1, i);
+        const key = y + "-" + pad(m) + "-" + pad(i);
+        out.push({
+          date: key,
+          day: i,
+          label: i + "日",
+          md: m + "月" + i + "日",
+          week: WEEK[d.getDay()],
+          spend: SPEND[key] ?? 0,
+          recharge: RECHARGE[key] ?? 0,
+          future: d > today,
+          bills: BILLS[key] || autoBills(key, SPEND[key] ?? 0, RECHARGE[key] ?? 0),
+        });
+      }
+      return out;
+    }
+
+    function autoBills(date, spend, recharge) {
+      if (!spend && !recharge) return [];
+      const rows = [];
+      if (spend > 16) {
+        rows.push({ t: "07:42", s: "早餐", a: -(Math.round(spend * 0.22 * 10) / 10) });
+        rows.push({ t: "11:28", s: "食堂", a: -(Math.round(spend * 0.48 * 10) / 10) });
+        const rest = -(Math.round((spend + rows[0].a + rows[1].a) * 100) / 100);
+        rows.push({ t: "17:36", s: "食堂", a: rest });
+      } else if (spend > 0) {
+        rows.push({ t: "11:30", s: "食堂", a: -spend });
+      }
+      if (recharge) rows.push({ t: "18:00", s: "银行转账", a: recharge });
+      return rows;
+    }
+
+    const MIN_MONTH = { y: 2026, m: 7 };
+    const CUR_MONTH = { y: 2026, m: 9 };
+
+    const PERIODS = [
+      { id: "1-2", label: "1–2", nanhu: "08:00–09:40", hunnan: "08:30–10:10" },
+      { id: "3-4", label: "3–4", nanhu: "10:00–11:40", hunnan: "10:30–12:10" },
+      { id: "5-6", label: "5–6", nanhu: "14:00–15:40", hunnan: "14:00–15:40" },
+      { id: "7-8", label: "7–8", nanhu: "16:00–17:40", hunnan: "16:00–17:40" },
+      { id: "9-10", label: "9–10", nanhu: "18:30–20:10", hunnan: "18:30–20:10" },
+      { id: "11-12", label: "11–12", nanhu: "20:20–22:00", hunnan: "20:20–22:00" },
+    ];
+    const SEM = [
+      { name: "高等数学A", place: "生命 B213", weekday: 1, period: "1-2", campus: "hunnan" },
+      { name: "大学英语", place: "文科 305", weekday: 1, period: "3-4", campus: "hunnan" },
+      { name: "程序设计基础", place: "信息科学 104", weekday: 1, period: "5-6", campus: "hunnan" },
+      { name: "线性代数", place: "生命 B213", weekday: 2, period: "1-2", campus: "hunnan" },
+      { name: "体育", place: "南湖操场", weekday: 2, period: "7-8", campus: "nanhu" },
+      { name: "高等数学A", place: "生命 B213", weekday: 3, period: "3-4", campus: "hunnan" },
+      { name: "程序设计基础", place: "信息科学 104", weekday: 3, period: "5-6", campus: "hunnan" },
+      { name: "大学英语", place: "文科 305", weekday: 4, period: "1-2", campus: "hunnan" },
+      { name: "形势与政策", place: "文管 201", weekday: 4, period: "5-6", campus: "hunnan" },
+      { name: "线性代数", place: "生命 B213", weekday: 5, period: "3-4", campus: "hunnan" },
+    ];
+    function primaryCampus() {
+      const n = SEM.filter((c) => c.campus === "hunnan").length;
+      return n >= SEM.length / 2 ? "hunnan" : "nanhu";
+    }
+    function blockTime(campus, id) {
+      const p = PERIODS.find((x) => x.id === id);
+      return p[campus] || p.nanhu;
+    }
+
+    const ui = {
+      scene: "main",
+      y: 2026,
+      m: 9,
+      selected: TODAY,
+      hover: null,
+      courseTip: null,
+      captcha: "K7P2",
+      ocr: "K7P2",
+      week: 3,
+      dow: 1,
+      pos: "center",
+    };
+
+    function monthDays() { return daysOfMonth(ui.y, ui.m); }
+    function isCurrentMonth() { return ui.y === CUR_MONTH.y && ui.m === CUR_MONTH.m; }
+    function monthLabel() { return isCurrentMonth() ? (ui.m + "月") : (ui.y + "年" + ui.m + "月"); }
+
+    const svg = {
+      refresh: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8a5 5 0 0 1 8.7-3.4M13 3v3h-3M13 8a5 5 0 0 1-8.7 3.4M3 13v-3h3"/></svg>',
+      gear: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2M3.8 3.8l1.4 1.4M10.8 10.8l1.4 1.4M12.2 3.8l-1.4 1.4M5.2 10.8l-1.4 1.4"/></svg>',
+    };
+
+    function miniBars() {
+      const days = daysOfMonth(CUR_MONTH.y, CUR_MONTH.m).filter((d) => !d.future);
+      const max = Math.max(...days.map((x) => x.spend), 1);
+      return days.map((d) => {
+        const h = d.spend ? Math.max(3, Math.round((d.spend / max) * 16)) : 0;
+        const cls = d.date === TODAY ? "today" : "";
+        return `<i class="${cls}" style="height:${h}px"></i>`;
+      }).join("");
+    }
+
+    function courses(kind) {
+      if (kind === "noclass") return `<div class="empty">今天洞里没课</div>`;
+      if (kind === "noschedule") return `<div class="empty">教务还没有本学期课表。军训结束、选课落定后再刷新。</div>`;
+      if (kind === "offcampus") return `<div class="err">出了洞，教务不理人<br><button class="retry" type="button">重试</button></div>`;
+      return `
+        <div class="course">
+          <div class="row past">
+            <div class="when"><span>08:30–10:10</span><span>已结束</span></div>
+            <div class="cname">高等数学A<span class="place">生命 B213</span></div>
+          </div>
+          <div class="row next">
+            <div class="when"><span>10:30–12:10</span><span>下一节 · 28 分钟</span></div>
+            <div class="cname">大学英语<span class="place">文科 305</span></div>
+          </div>
+          <div class="row">
+            <div class="when"><span>14:00–15:40</span><span></span></div>
+            <div class="cname">程序设计基础<span class="place">信息科学 104</span></div>
+          </div>
+        </div>`;
+    }
+
+    function cards() {
+      return `
+        <div class="cards">
+          <div class="card clickable" data-go="bills">
+            <div class="k">校园卡</div>
+            <div class="v num">399.07</div>
+            <div class="u">元</div>
+            <div class="mini">${miniBars()}</div>
+          </div>
+          <div class="card warn">
+            <div class="k">网费</div>
+            <div class="v num">0.00</div>
+            <div class="u warn">元 · 见底了</div>
+            <div class="u" style="margin-top:4px">已用 1.90 GB</div>
+          </div>
+          <div class="card">
+            <div class="k">电费</div>
+            <div class="v">未绑定</div>
+            <div class="u">房间</div>
+          </div>
+        </div>`;
+    }
+
+    function chartHTML() {
+      const days = monthDays();
+      const max = Math.max(...days.map((d) => d.spend), 1);
+      const cols = days.map((d) => {
+        const h = d.spend ? Math.max(4, Math.round((d.spend / max) * 104)) : 0;
+        const cls = [
+          d.date === TODAY ? "today" : "",
+          d.date === ui.selected ? "sel" : "",
+        ].filter(Boolean).join(" ");
+        const bar = d.spend ? `<div class="bar ${cls}" style="height:${h}px"></div>` : "";
+        return `<div class="col ${d.future ? "future" : ""}" data-day="${d.date}">${bar}</div>`;
+      }).join("");
+      const x0 = days[0], x1 = days[Math.floor(days.length / 2)], x2 = days[days.length - 1];
+      const tipDay = days.find((d) => d.date === ui.hover);
+      let tip = "";
+      if (tipDay) {
+        const n = tipDay.bills.filter((b) => b.a < 0).length;
+        let spendText = "没刷卡";
+        if (tipDay.future) spendText = "还没到";
+        else if (tipDay.spend) spendText = `¥${fmt(tipDay.spend)} · ${n} 笔`;
+        const idx = days.findIndex((d) => d.date === ui.hover);
+        const pct = ((idx + 0.5) / days.length) * 100;
+        tip = `<div class="tip" style="left:${pct}%">${tipDay.md} 周${tipDay.week} · ${spendText}</div>`;
+      }
+      const xLast = isCurrentMonth() ? "今天" : x2.label;
+      return `
+        <div class="chart-block">
+          ${tip}
+          <div class="chart">${cols}</div>
+          <div class="xaxis"><span>${x0.label}</span><span>${x1.label}</span><span>${xLast}</span></div>
+        </div>`;
+    }
+
+    function billList() {
+      const days = monthDays();
+      const day = days.find((d) => d.date === ui.selected) || days.find((d) => d.date === TODAY) || days[days.length - 1];
+      const n = day.bills.filter((b) => b.a < 0).length;
+      const title = `${day.md} 周${day.week} · ${n} 笔 · ${fmt(day.spend)} 元`;
+      let empty = "这天没刷卡";
+      if (day.future) empty = "还没到这一天";
+      const rows = (!day.future && day.bills.length)
+        ? day.bills.map((b) => `
+            <div class="bill">
+              <span class="t num">${b.t}</span>
+              <span class="s">${b.s}</span>
+              <span class="a num ${b.a > 0 ? "pos" : "neg"}">${b.a > 0 ? "+" : ""}${fmt(b.a)}</span>
+            </div>`).join("")
+        : `<div class="bill-empty">${empty}</div>`;
+      return `<div class="day-title">${title}</div><div class="bills">${rows}</div>`;
+    }
+
+    function metrics() {
+      const days = monthDays();
+      const sum = days.reduce((a, d) => a + d.spend, 0);
+      const today = SPEND[TODAY] || 0;
+      const past = days.filter((d) => !d.future);
+      const avg = past.length ? sum / past.length : 0;
+      const third = isCurrentMonth()
+        ? `<div><div class="k">今日</div><div class="v num">${fmt(today)} 元</div></div>`
+        : `<div><div class="k">日均</div><div class="v num">${fmt(avg)} 元</div></div>`;
+      return `
+        <div class="metrics">
+          <div><div class="k">余额</div><div class="v num">399.07 元</div></div>
+          <div><div class="k">${isCurrentMonth() ? "本月" : ui.m + "月"}</div><div class="v num">${fmt(sum)} 元</div></div>
+          ${third}
+        </div>`;
+    }
+
+    function monthNav() {
+      const atMin = ui.y === MIN_MONTH.y && ui.m === MIN_MONTH.m;
+      const atMax = isCurrentMonth();
+      return `<div class="month-nav">
+        <button data-month="-1" ${atMin ? "disabled" : ""}>‹</button>
+        <span>${monthLabel()}</span>
+        <button data-month="1" ${atMax ? "disabled" : ""}>›</button>
+      </div>`;
+    }
+
+    function billsPanel(kind) {
+      const back = `<div class="bill-head">
+        <button class="back" data-go="main">‹ 校园卡</button>
+        ${monthNav()}
+      </div>`;
+      if (kind === "empty") {
+        const days = monthDays();
+        const cols = days.map((d) => `<div class="col" data-day="${d.date}"></div>`).join("");
+        return back + `<div class="metrics">
+          <div><div class="k">余额</div><div class="v num">399.07 元</div></div>
+          <div><div class="k">${isCurrentMonth() ? "本月" : ui.m + "月"}</div><div class="v num">0.00 元</div></div>
+          <div><div class="k">今日</div><div class="v num">0.00 元</div></div>
+        </div>
+        <div class="chart">${cols}</div>
+        <div class="xaxis"><span>1日</span><span>15日</span><span>${days[days.length-1].label}</span></div>
+        <div class="empty" style="margin-top:12px">这个月卡没动过</div>
+        <div class="foot">基线还在，没有假高峰。</div>`;
+      }
+      if (kind === "fail") {
+        return back + `<div class="metrics">
+          <div><div class="k">余额</div><div class="v num">399.07 元</div></div>
+          <div><div class="k">本月</div><div class="v">—</div></div>
+          <div><div class="k">今日</div><div class="v">—</div></div>
+        </div>
+        <div class="err">账单暂时拉不到<br><button class="retry" type="button">重试</button></div>`;
+      }
+      return back + metrics() + chartHTML() + billList() +
+        `<div class="foot">只计消费，充值不进柱高 · 生活费按月看</div>`;
+    }
+
+    function semesterPanel() {
+      const heads = ["一", "二", "三", "四", "五", "六", "日"].map((w) => `<div class="h">${w}</div>`).join("");
+      const home = primaryCampus();
+      const cells = PERIODS.map((p) => {
+        const label = `<div class="p">${p.label}<small>${p[home]}</small></div>`;
+        const cols = [1, 2, 3, 4, 5, 6, 7].map((dow) => {
+          const c = SEM.find((x) => x.weekday === dow && x.period === p.id);
+          if (!c) return `<div class="cell empty"></div>`;
+          const tip = `${blockTime(c.campus, p.id)} · ${c.place}`;
+          return `<div class="cell" data-ctip="${tip}">${c.name}</div>`;
+        }).join("");
+        return label + cols;
+      }).join("");
+      return `
+        <div class="bill-head">
+          <button class="back" data-go="main">‹ 学期课表</button>
+          <div class="month-nav">
+            <button data-week="-1" ${ui.week <= 1 ? "disabled" : ""}>‹</button>
+            <span>第 ${ui.week} 周</span>
+            <button data-week="1" ${ui.week >= 18 ? "disabled" : ""}>›</button>
+          </div>
+        </div>
+        <div class="tt" style="position:relative">
+          <div></div>${heads}
+          ${cells}
+        </div>
+        <div class="foot">作息按课表自动：${home === "hunnan" ? "浑南" : "南湖"}（上午与另一校区不同）· 悬停看该课时间地点</div>`;
+    }
+
+    function login() {
+      return `
+        <div class="topbar"><h1>进入泥洞</h1></div>
+        <label>学号</label>
+        <input type="text" value="20260001" />
+        <label>密码</label>
+        <input type="password" value="password" />
+        <button class="primary" data-go="main">进入泥洞</button>
+        <button class="ghost" data-go="sms">验证码登录（新设备可能要短信）</button>
+        <div class="hint">密码只存在这台电脑，不进任何服务器。</div>`;
+    }
+
+    function sms() {
+      return `
+        <div class="topbar"><h1>验证这台电脑</h1></div>
+        <div class="hint">绑定手机 *******1479</div>
+        <label>图形验证码 · 学校的，不是泥洞的</label>
+        <div class="sms-row">
+          <input type="text" value="${ui.ocr}" style="flex:1" />
+          <div class="captcha">${ui.captcha}</div>
+        </div>
+        <div class="ocr-ok">本机已识别，不对就改 · 图不离开这台电脑</div>
+        <label>短信码</label>
+        <div class="sms-row">
+          <input type="text" placeholder="6 位" maxlength="6" style="flex:1" />
+          <button class="retry" type="button" style="margin:0">发送</button>
+        </div>
+        <div class="toggle"><span>信任这台电脑</span><div class="sw on"><i></i></div></div>
+        <button class="primary" data-go="main">继续</button>`;
+    }
+
+    function settings() {
+      return `
+        <div class="bill-head"><button class="back" data-go="main">‹ 设置</button></div>
+        <div class="group">
+          <h3>电费房间码</h3>
+          <input type="text" placeholder="宿舍 3 位 + 寝室 4 位" />
+          <h3>低余额阈值</h3>
+          <div class="hint">卡 20 元 · 网 5 元 · 电 10 度</div>
+          <div class="toggle"><span>开机自启</span><div class="sw"><i></i></div></div>
+          <div class="toggle"><span>主题跟随系统</span><div class="sw on"><i></i></div></div>
+          <div class="cache-line">
+            <span>课表 · 9月1日已缓存</span>
+            <button class="link" type="button">重新同步</button>
+          </div>
+          <div class="toggle" style="color:var(--danger)"><span>退出</span><span></span></div>
+        </div>`;
+    }
+
+    function collapsed(scene) {
+      const map = {
+        collapsed: { mid: "大学英语 · 10:30", aux: "23 分钟", dot: "" },
+        class: { mid: "大学英语 · 进行中", aux: "还剩 18 分钟", dot: '<span class="dot blue"></span>' },
+        warn: { mid: "大学英语 · 10:30", aux: '<span style="color:var(--warn)">网费 0 元</span>', dot: '<span class="dot warn"></span>' },
+        out: { mid: "登录泥洞", aux: "→", dot: "" },
+      };
+      const s = map[scene];
+      return `<div class="collapsed-row"><div class="logo">泥</div><div class="mid">${s.mid}</div>${s.dot}<div class="aux">${s.aux}</div></div>`;
+    }
+
+    function expandedChrome(inner, foot) {
+      return `
+        <div class="collapsed-row" style="opacity:.0;pointer-events:none;height:0;padding:0;overflow:hidden"></div>
+        <div class="panel">
+          <div class="topbar">
+            <h1>泥洞</h1>
+            <div class="week">第 3 周 · 周一</div>
+            <button class="icon-btn" title="刷新">${svg.refresh}</button>
+            <button class="icon-btn" data-go="settings" title="设置">${svg.gear}</button>
+          </div>
+          ${inner}
+          <div class="foot">${foot}</div>
+        </div>`;
+    }
+
+    function render() {
+      const el = document.getElementById("island");
+      const scene = ui.scene;
+      const collapsedScenes = ["collapsed", "class", "warn", "out"];
+      el.className = "island " + (collapsedScenes.includes(scene) ? "collapsed" : "expanded");
+
+      if (collapsedScenes.includes(scene)) {
+        el.innerHTML = collapsed(scene);
+      } else if (scene === "main" || scene === "noclass" || scene === "offcampus" || scene === "noschedule") {
+        const net = scene === "offcampus" ? "校外，课表可能不是最新" : "校园网";
+        el.innerHTML = expandedChrome(
+          cards() + `<div class="sec-title"><span>今日</span><button class="text-btn" data-go="semester">学期 ›</button></div>` + courses(scene),
+          scene === "offcampus" ? `12:03 同步 · ${net}` : `12:03 同步 · ${net} · 课表缓存于 9月1日`
+        );
+      } else if (scene === "bills" || scene === "bills-empty" || scene === "bills-fail") {
+        const kind = scene === "bills-empty" ? "empty" : scene === "bills-fail" ? "fail" : "ok";
+        el.innerHTML = `<div class="panel">${billsPanel(kind)}</div>`;
+      } else if (scene === "semester") {
+        el.innerHTML = `<div class="panel">${semesterPanel()}</div>`;
+      } else if (scene === "login") {
+        el.innerHTML = `<div class="panel">${login()}</div>`;
+      } else if (scene === "sms") {
+        el.innerHTML = `<div class="panel">${sms()}</div>`;
+      } else if (scene === "settings") {
+        el.innerHTML = `<div class="panel">${settings()}</div>`;
+      }
+
+      document.querySelectorAll(".proto [data-scene]").forEach((b) => {
+        b.classList.toggle("on", b.dataset.scene === ui.scene);
+      });
+      const wrap = document.querySelector(".island-wrap");
+      if (ui.pos === "custom" && ui.x != null) {
+        wrap.style.left = ui.x + "px";
+        wrap.style.top = ui.y + "px";
+        wrap.style.transform = "none";
+        wrap.classList.remove("shift-left", "shift-right");
+      } else {
+        wrap.style.left = "";
+        wrap.style.top = "";
+        wrap.style.transform = "";
+        wrap.classList.toggle("shift-left", ui.pos === "left");
+        wrap.classList.toggle("shift-right", ui.pos === "right");
+      }
+    }
+
+    function shiftMonth(delta) {
+      let y = ui.y, m = ui.m + delta;
+      if (m < 1) { m = 12; y--; }
+      if (m > 12) { m = 1; y++; }
+      const t = y * 12 + m;
+      if (t < MIN_MONTH.y * 12 + MIN_MONTH.m) return;
+      if (t > CUR_MONTH.y * 12 + CUR_MONTH.m) return;
+      ui.y = y; ui.m = m;
+      const days = monthDays();
+      ui.selected = isCurrentMonth() ? TODAY : days[days.length - 1].date;
+      ui.hover = null;
+    }
+
+    function setScene(s) {
+      ui.scene = s;
+      if (s === "bills") {
+        ui.y = CUR_MONTH.y; ui.m = CUR_MONTH.m; ui.selected = TODAY;
+      }
+      render();
+    }
+
+    document.querySelector(".proto").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-scene]");
+      if (b) setScene(b.dataset.scene);
+    });
+
+    document.getElementById("themeBtn").addEventListener("click", () => {
+      const html = document.documentElement;
+      const next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      html.setAttribute("data-theme", next);
+      document.getElementById("themeBtn").textContent = next === "dark" ? "浅色" : "深色";
+    });
+
+    const island = document.getElementById("island");
+    island.addEventListener("dblclick", (e) => {
+      if (!e.target.closest(".logo")) return;
+      ui.pos = "center"; ui.x = null; ui.y = null; render();
+    });
+    island.addEventListener("mouseenter", () => {
+      if (["collapsed", "class", "warn"].includes(ui.scene)) setScene("main");
+      if (ui.scene === "out") setScene("login");
+    });
+
+    island.addEventListener("click", (e) => {
+      const go = e.target.closest("[data-go]");
+      if (go) { setScene(go.dataset.go); return; }
+      const monthBtn = e.target.closest("[data-month]");
+      if (monthBtn && !monthBtn.disabled) { shiftMonth(Number(monthBtn.dataset.month)); render(); return; }
+      const weekBtn = e.target.closest("[data-week]");
+      if (weekBtn && !weekBtn.disabled) {
+        ui.week = Math.min(18, Math.max(1, ui.week + Number(weekBtn.dataset.week)));
+        render(); return;
+      }
+      const dow = e.target.closest("[data-dow]");
+      if (dow) { ui.dow = Number(dow.dataset.dow); render(); return; }
+
+      const col = e.target.closest("[data-day]");
+      if (col) { ui.selected = col.dataset.day; ui.hover = col.dataset.day; render(); return; }
+      if (e.target.closest(".captcha")) {
+        const next = ["K7P2", "8M3Q", "R2NX"][Math.floor(Math.random() * 3)];
+        ui.captcha = next;
+        ui.ocr = next;
+        render();
+      }
+    });
+
+    island.addEventListener("mousemove", (e) => {
+      const col = e.target.closest("[data-day]");
+      if (col) {
+        if (ui.hover !== col.dataset.day) {
+          ui.hover = col.dataset.day;
+          render();
+        }
+        return;
+      }
+      const cell = e.target.closest("[data-ctip]");
+      const grid = island.querySelector(".tt");
+      if (grid) {
+        let tip = grid.querySelector(".tip");
+        if (cell) {
+          if (!tip) {
+            tip = document.createElement("div");
+            tip.className = "tip";
+            grid.appendChild(tip);
+          }
+          const r = grid.getBoundingClientRect();
+          tip.style.left = (e.clientX - r.left) + "px";
+          tip.style.top = (e.clientY - r.top - 28) + "px";
+          tip.style.bottom = "auto";
+          tip.textContent = cell.dataset.ctip;
+        } else if (tip) {
+          tip.remove();
+        }
+      }
+    });
+    island.addEventListener("mouseleave", () => {
+      if (ui.hover) { ui.hover = null; render(); }
+    });
+
+    (function setupDrag() {
+      const wrap = document.querySelector(".island-wrap");
+      let dragging = false, ox = 0, oy = 0;
+      wrap.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest("button, input, a, .col, .cell, .chart, .bills, .tt, .sw, .card, .course, .mini, .metrics, .link")) return;
+        const r = wrap.getBoundingClientRect();
+        dragging = true;
+        wrap.style.left = r.left + "px";
+        wrap.style.top = r.top + "px";
+        wrap.style.transform = "none";
+        wrap.classList.remove("shift-left", "shift-right");
+        ox = e.clientX - r.left;
+        oy = e.clientY - r.top;
+        wrap.style.cursor = "grabbing";
+        e.preventDefault();
+      });
+      window.addEventListener("mousemove", (e) => {
+        if (!dragging) return;
+        const w = wrap.offsetWidth;
+        let x = e.clientX - ox;
+        let y = e.clientY - oy;
+        x = Math.max(0, Math.min(x, window.innerWidth - w));
+        y = Math.max(0, Math.min(y, window.innerHeight - 64));
+        wrap.style.left = x + "px";
+        wrap.style.top = y + "px";
+        ui.x = x; ui.y = y; ui.pos = "custom";
+      });
+      window.addEventListener("mouseup", () => {
+        if (!dragging) return;
+        dragging = false;
+        wrap.style.cursor = "";
+      });
+    })();
+
+    render();
+  </script>
+</body>
+</html>
