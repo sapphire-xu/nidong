@@ -18,6 +18,7 @@ pub fn normalize_proxy(raw: &str) -> String {
 }
 
 static CAMPUS_CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+static ONLINE_CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
 
 /// 校园网内才能很快连上的主机。校外这两个端口通常不通。
 /// 同一轮刷新里结果缓存 30 秒，避免卡/课各探一次结论打架。
@@ -38,6 +39,47 @@ pub fn probe_campus_net() -> bool {
         *g = Some((Instant::now(), v));
     }
     v
+}
+
+/// 本机是否还能连上外网或校园网。没网时不要把会话当成过期去催重新登录。
+pub fn online() -> bool {
+    if let Ok(g) = ONLINE_CACHE.lock() {
+        if let Some((t, v)) = *g {
+            if t.elapsed() < Duration::from_secs(8) {
+                return v;
+            }
+        }
+    }
+    let v = probe_online();
+    if let Ok(mut g) = ONLINE_CACHE.lock() {
+        *g = Some((Instant::now(), v));
+    }
+    v
+}
+
+fn probe_online() -> bool {
+    // IP 先探，断网时不必等 DNS。国内 DNS 的 53/tcp 偶尔被拦，再补学校站和校园网。
+    tcp_ok("223.5.5.5", 53, 450)
+        || tcp_ok("114.114.114.114", 53, 450)
+        || tcp_ok("pass.neu.edu.cn", 443, 900)
+        || probe_campus_net()
+}
+
+pub fn is_offline_err(s: &str) -> bool {
+    let t = s.to_ascii_lowercase();
+    t.contains("10050")
+        || t.contains("10051")
+        || t.contains("10065")
+        || t.contains("11001")
+        || t.contains("11004")
+        || t.contains("network is unreachable")
+        || t.contains("no route to host")
+        || t.contains("name or service not known")
+        || t.contains("failed to lookup")
+        || t.contains("dns error")
+        || t.contains("connectex")
+        || s.contains("无法访问网络")
+        || s.contains("找不到主机")
 }
 
 pub fn tcp_ok(host: &str, port: u16, ms: u64) -> bool {
@@ -271,7 +313,8 @@ use chrono::Datelike;
 #[cfg(test)]
 mod tests {
     use super::{
-        attr_value, input_id_value, is_dead_proxy_err, normalize_proxy, parse_money, proxy_reachable,
+        attr_value, input_id_value, is_dead_proxy_err, is_offline_err, normalize_proxy, parse_money,
+        proxy_reachable,
     };
 
     #[test]
@@ -304,6 +347,13 @@ mod tests {
         assert!(is_dead_proxy_err(
             &"tunnel error: failed to create underlying connection → 积极拒绝 (os error 10061)"
         ));
+    }
+
+    #[test]
+    fn offline_err_matches_windows_codes() {
+        assert!(is_offline_err("os error 10051"));
+        assert!(is_offline_err("Name or service not known"));
+        assert!(!is_offline_err("会话已失效，请重新登录"));
     }
 
     #[test]

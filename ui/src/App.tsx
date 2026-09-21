@@ -1,15 +1,17 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api, focusIsland, setExpanded } from "./api";
+import { api, focusIsland, PANEL_MAX, setExpanded } from "./api";
 import { SettingsPanel } from "./Settings";
-import type { AppSettings, Course, DaySpend, LoginOutcome, Snapshot } from "./types";
+import { EventForm } from "./EventForm";
+import type { Agenda, AppSettings, Course, DaySpend, LoginOutcome, Snapshot } from "./types";
 import {
   BLOCKS,
   WEEKDAY_SHORT,
+  addDays,
+  allCoursesEnded,
   blockTime,
   cacheDayLabel,
-  classifyToday,
   collapsedFromCourses,
   coursesOnDay,
   datesOfTeachingWeek,
@@ -19,9 +21,11 @@ import {
   maxWeek,
   overlapsBlock,
   teachingWeek,
+  teachingWeekFromTerm,
   upcomingCourse,
   weekdayOf,
 } from "./course";
+import { agendaOnDate, agendasOnDate, mixDay, upcomingAgenda, weekdayLabel, type MixRow } from "./agenda";
 
 const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
 
@@ -49,7 +53,7 @@ function resolveTheme(theme: string | undefined) {
   return "dark";
 }
 
-type View = "main" | "bills" | "net" | "about" | "login" | "sms" | "settings" | "semester";
+type View = "main" | "bills" | "net" | "about" | "login" | "sms" | "settings" | "semester" | "event";
 
 const WEEK = ["日", "一", "二", "三", "四", "五", "六"];
 const fmt = (n: number) => n.toFixed(2);
@@ -58,16 +62,46 @@ const pad = (n: number) => String(n).padStart(2, "0");
 
 function dragIgnore(t: EventTarget | null) {
   return !!(t as HTMLElement | null)?.closest?.(
-    "button, input, a, label, .sw, .card.clickable, .col, .bills, .cell, .course, .text-btn, .tt, .brand"
+    "button, input, textarea, a, label, .sw, .card.clickable, .col, .bills, .cell, .course, .text-btn, .tt, .brand, .row.event"
   );
 }
 
+function placeLabel(p?: string) {
+  const t = (p || "").trim();
+  if (!t || t === "浑南校区" || t === "南湖校区" || t === "浑南" || t === "南湖") {
+    return "地点未定";
+  }
+  return t;
+}
+
 function courseMeta(c: Course) {
-  return [c.teacher, c.place].filter((s) => s && s.trim()).join(" · ");
+  return [c.teacher, placeLabel(c.place)].filter((s) => s && s.trim()).join(" · ");
 }
 
 function courseTip(c: Course) {
-  return [`${c.start}–${c.end}`, c.teacher, c.place].filter((s) => s && String(s).trim()).join(" · ");
+  return [`${c.start}–${c.end}`, c.teacher, placeLabel(c.place)].filter((s) => s && String(s).trim()).join(" · ");
+}
+
+function MixRowView({ row, onEvent }: { row: MixRow; onEvent?: () => void }) {
+  const event = row.type === "event";
+  return (
+    <div
+      className={`row ${row.kind === "later" ? "" : row.kind}${event ? " event" : ""}`}
+      onClick={event ? onEvent : undefined}
+    >
+      <div className="when">
+        <span className="num">{row.start}–{row.end}</span>
+        <span>{row.label}</span>
+      </div>
+      <div className="cname">
+        <span className="cname-main">
+          {event ? <i className="kind-dot" aria-hidden="true" /> : null}
+          {row.name}
+        </span>
+        <span className="place">{row.course ? courseMeta(row.course) : row.meta || "日程"}</span>
+      </div>
+    </div>
+  );
 }
 
 function formatBytes(n: number) {
@@ -121,6 +155,13 @@ export default function App() {
   const [captchaBusy, setCaptchaBusy] = useState(false);
   const [smsHint, setSmsHint] = useState("");
   const [refreshUi, setRefreshUi] = useState<"idle" | "spin" | "ok">("idle");
+  const [courseSync, setCourseSync] = useState<"idle" | "spin" | "ok" | "fail">("idle");
+  const [courseSyncErr, setCourseSyncErr] = useState("");
+  const [editingEvent, setEditingEvent] = useState<Agenda | null>(null);
+  const [eventNonce, setEventNonce] = useState(0);
+  const [eventErr, setEventErr] = useState("");
+  const [eventBusy, setEventBusy] = useState(false);
+  const eventBackRef = useRef<View>("main");
   const [clockOverridden, setClockOverridden] = useState(false);
   const refreshOkTimer = useRef(0);
   const [hover, setHover] = useState<string | null>(null);
@@ -135,9 +176,9 @@ export default function App() {
   const islandRef = useRef<HTMLDivElement>(null);
   const [hidden, setHidden] = useState(false);
   const [stowing, setStowing] = useState(false);
-  const [remind, setRemind] = useState<{ name: string; start: string } | null>(null);
+  const [remind, setRemind] = useState<{ name: string; start: string; kind?: "class" | "event" } | null>(null);
   const hiddenRef = useRef(false);
-  const remindRef = useRef<{ name: string; start: string } | null>(null);
+  const remindRef = useRef<{ name: string; start: string; kind?: "class" | "event" } | null>(null);
   const expandedRef = useRef(false);
   const autoHideRef = useRef(false);
   const autoHideHoverRef = useRef(false);
@@ -148,7 +189,7 @@ export default function App() {
   const tookOverRef = useRef(false);
   const preRemindRef = useRef<{ expanded: boolean; hidden: boolean; pinned: boolean } | null>(null);
   const remindedId = useRef("");
-  const startRemindRef = useRef<(c: Course) => void>(() => undefined);
+  const startRemindRef = useRef<(c: Course & { kind?: "class" | "event" }) => void>(() => undefined);
   const revealAndPinRef = useRef<(pin?: boolean) => void>(() => undefined);
   const hotkeyHoldingRef = useRef(false);
   const openOverlayRef = useRef<(next: View) => void>(() => undefined);
@@ -268,7 +309,7 @@ export default function App() {
     const panel = islandRef.current?.querySelector(".panel") as HTMLElement | null;
     if (!panel) return;
     const measure = () => {
-      const h = Math.min(560, Math.max(160, Math.ceil(panel.scrollHeight)));
+      const h = Math.min(PANEL_MAX, Math.max(160, Math.ceil(panel.scrollHeight)));
       setIslandH(h);
     };
     const id = requestAnimationFrame(measure);
@@ -278,7 +319,7 @@ export default function App() {
       cancelAnimationFrame(id);
       ro.disconnect();
     };
-  }, [expanded, view, panelIn, snap, selected, semWeek, refreshUi]);
+  }, [expanded, view, panelIn, snap, selected, semWeek, refreshUi, courseSync, editingEvent]);
 
   const winH = useRef(40);
   useEffect(() => {
@@ -396,7 +437,7 @@ export default function App() {
     if (pin) focusIsland();
   }, [expand]);
 
-  const startRemind = useCallback(async (course: Course) => {
+  const startRemind = useCallback(async (course: Course & { kind?: "class" | "event" }) => {
     hideGen.current += 1;
     window.clearTimeout(hideTimer.current);
     window.clearTimeout(hoverExpandTimer.current);
@@ -414,7 +455,7 @@ export default function App() {
     } catch {
       try { await getCurrentWindow().show(); } catch { /* ignore */ }
     }
-    setRemind({ name: course.name, start: course.start });
+    setRemind({ name: course.name, start: course.start, kind: course.kind || "class" });
     setExp(false);
     setIslandH(40);
     try { await setExpanded(false); } catch { /* ignore */ }
@@ -451,6 +492,13 @@ export default function App() {
   openOverlayRef.current = openOverlay;
 
   const closeOverlay = useCallback(async () => {
+    if (viewRef.current === "event") {
+      const back = eventBackRef.current || "main";
+      setEditingEvent(null);
+      setEventErr("");
+      setView(back);
+      if (back !== "main") return;
+    }
     const restore = pinBeforeOverlay.current;
     pinBeforeOverlay.current = null;
     const roomChanged = settings && settings.roomNo !== roomAtSettingsOpen.current;
@@ -705,7 +753,7 @@ export default function App() {
         else if (pre?.hidden && autoHideRef.current && !hoveredRef.current) hideIsland();
         return;
       }
-      if (view === "bills" || view === "net" || view === "about" || view === "settings" || view === "login" || view === "sms" || view === "semester") {
+      if (view === "bills" || view === "net" || view === "about" || view === "settings" || view === "login" || view === "sms" || view === "semester" || view === "event") {
         closeOverlay();
         return;
       }
@@ -861,7 +909,8 @@ export default function App() {
     try {
       const s = await api.refresh();
       setSnap(s);
-      markRefreshOk();
+      if (s.offline) setRefreshUi("idle");
+      else markRefreshOk();
     } catch (e) {
       setErr(String(e));
       setRefreshUi("idle");
@@ -869,16 +918,58 @@ export default function App() {
   }
 
   async function doSyncCourses() {
-    if (refreshUi === "spin") return;
-    setRefreshUi("spin");
+    if (courseSync === "spin") return;
+    setCourseSync("spin");
+    setCourseSyncErr("");
     setErr("");
     try {
       const s = await api.syncCourses();
       setSnap(s);
-      markRefreshOk();
+      setCourseSync("ok");
+      window.setTimeout(() => setCourseSync((u) => (u === "ok" ? "idle" : u)), 1600);
     } catch (e) {
-      setErr(String(e));
-      setRefreshUi("idle");
+      const msg = String(e);
+      setCourseSync("fail");
+      setCourseSyncErr(msg);
+      setErr(msg);
+    }
+  }
+
+  function openEvent(item: Agenda | null) {
+    eventBackRef.current = viewRef.current === "event" ? eventBackRef.current : viewRef.current;
+    setEditingEvent(item);
+    setEventErr("");
+    setEventNonce((n) => n + 1);
+    openOverlay("event");
+  }
+
+  async function saveEvent(item: Agenda) {
+    if (eventBusy) return;
+    setEventBusy(true);
+    setEventErr("");
+    try {
+      const s = await api.saveAgenda(item);
+      setSnap(s);
+      setEventBusy(false);
+      await closeOverlay();
+    } catch (e) {
+      setEventErr(String(e));
+      setEventBusy(false);
+    }
+  }
+
+  async function deleteEvent(id: string) {
+    if (eventBusy) return;
+    setEventBusy(true);
+    setEventErr("");
+    try {
+      const s = await api.deleteAgenda(id);
+      setSnap(s);
+      setEventBusy(false);
+      await closeOverlay();
+    } catch (e) {
+      setEventErr(String(e));
+      setEventBusy(false);
     }
   }
 
@@ -922,32 +1013,69 @@ export default function App() {
   const elecSyncFail = !elecMaint && !!snap?.errors.elec;
   const elecWarn = elecCached && (snap?.elec?.remainKwh ?? 999) < (settings?.elecWarn ?? 10);
   const week1 = (settings?.week1Monday || snap?.semester?.week1Monday || defaultWeek1(snap?.semester?.semesterId) || "").trim();
-  const weekNow = teachingWeek(week1, now) ?? snap?.teachingWeek;
+  const weekNow =
+    (!settings?.week1Monday
+      ? teachingWeekFromTerm(snap?.semester?.termWeeks, now)
+      : undefined) ??
+    teachingWeek(week1, now) ??
+    snap?.teachingWeek;
   const weekdayNow = weekdayOf(now);
   const todayCourses = snap?.semester
     ? coursesOnDay(snap.semester, weekNow, weekdayNow)
     : snap?.coursesToday || [];
-  const todayRows = classifyToday(todayCourses, now);
+  const tomorrowDate = addDays(now, 1);
+  const weekTomorrow =
+    (!settings?.week1Monday
+      ? teachingWeekFromTerm(snap?.semester?.termWeeks, tomorrowDate)
+      : undefined) ??
+    teachingWeek(week1, tomorrowDate) ??
+    (weekdayNow === 7 && weekNow ? weekNow + 1 : weekNow);
+  const tomorrowCourses = snap?.semester
+    ? coursesOnDay(snap.semester, weekTomorrow, weekdayOf(tomorrowDate))
+    : [];
+  const todayDone = allCoursesEnded(todayCourses, now);
+  const todayEvents = agendasOnDate(snap?.agenda, clockDay);
+  const tomorrowEvents = agendasOnDate(snap?.agenda, ymd(tomorrowDate));
+  const todayMix = mixDay(todayDone ? [] : todayCourses, todayEvents, now);
+  const tomorrowMix = mixDay(tomorrowCourses, tomorrowEvents, now, tomorrowDate);
+  const remainingTodayEvents = mixDay([], todayEvents, now).filter((r) => r.kind !== "past");
   const collapsedCourse = loggedIn ? collapsedFromCourses(todayCourses, now) : null;
+  const collapsed = collapsedCourse?.mid === "今天课上完了" && tomorrowCourses[0]
+    ? { ...collapsedCourse, aux: `明天 ${tomorrowCourses[0].start}` }
+    : collapsedCourse;
+  const offline = !!snap?.offline;
   const cacheLabel = cacheDayLabel(snap?.semester?.fetchedAt);
   const semMax = snap?.semester ? maxWeek(snap.semester) : 18;
   const todayKey = todayCourses.map((c) => `${c.name}@${c.start}`).join("|");
   const flushTop = (settings?.islandY ?? 0) < 2;
 
   useEffect(() => {
-    if (!settings?.classRemind) return;
     if (remind) return;
-    const mins = Math.max(1, Math.floor(Number(settings.classRemindMinutes) || 15));
-    const c = upcomingCourse(todayCourses, now, mins);
-    if (!c) {
-      remindedId.current = "";
-      return;
+    const mins = Math.max(1, Math.floor(Number(settings?.classRemindMinutes) || 15));
+    if (settings?.classRemind) {
+      const c = upcomingCourse(todayCourses, now, mins);
+      if (c) {
+        const id = `${ymd(now)}-${c.name}-${c.start}`;
+        if (remindedId.current === id) return;
+        remindedId.current = id;
+        startRemindRef.current({ ...c, kind: "class" });
+        return;
+      }
     }
-    const id = `${ymd(now)}-${c.name}-${c.start}`;
+    const ev = upcomingAgenda(snap?.agenda || [], now);
+    if (!ev) return;
+    const id = `event-${ev.id}-${ev.start}`;
     if (remindedId.current === id) return;
     remindedId.current = id;
-    startRemindRef.current(c);
-  }, [now, settings?.classRemind, settings?.classRemindMinutes, todayKey, remind, todayCourses]);
+    startRemindRef.current({
+      name: ev.name,
+      place: "",
+      start: ev.start.slice(11, 16),
+      end: ev.end.slice(11, 16),
+      weekday: weekdayNow || 1,
+      kind: "event",
+    });
+  }, [now, settings?.classRemind, settings?.classRemindMinutes, todayKey, remind, todayCourses, snap?.agenda, weekdayNow]);
 
   function onDragPointerDown(e: React.PointerEvent) {
     if (e.button !== 0 || dragIgnore(e.target)) return;
@@ -1001,27 +1129,27 @@ export default function App() {
   }
 
   const collapsedMid = remind
-    ? `即将上课 · ${remind.name}`
+    ? `${remind.kind === "event" ? "即将开始" : "即将上课"} · ${remind.name}`
     : silentLogin
       ? refreshUi === "spin"
         ? "同步中…"
         : "登录中…"
       : !loggedIn
         ? "登录泥洞"
-        : collapsedCourse?.mid || "今天没课";
+        : collapsed?.mid || "今天没课";
   const collapsedAux = remind
     ? remind.start
     : !loggedIn
       ? "→"
-      : collapsedCourse?.aux
-        ? collapsedCourse.aux
+      : collapsed?.aux
+        ? collapsed.aux
         : netWarn && snap?.net
           ? `网费 ${fmt(snap.net.balance)} 元`
           : snap?.card
             ? `卡 ${fmt(snap.card.balance)}`
             : "";
-  const showLiveDot = !remind && !!collapsedCourse?.live;
-  const showSoonWarn = !remind && !!collapsedCourse?.soon;
+  const showLiveDot = !remind && !!collapsed?.live;
+  const showSoonWarn = !remind && !!collapsed?.soon;
   const showBalWarn = !remind && loggedIn && (cardWarn || netWarn || elecWarn) && !showLiveDot;
 
   return (
@@ -1067,14 +1195,16 @@ export default function App() {
         <div className="panel">
           <div className="topbar drag">
             <button type="button" className="brand" onClick={(e) => { e.stopPropagation(); openOverlay("about"); }}>泥洞</button>
-            <div className="week">
-              {loggedIn
-                ? weekNow
-                  ? `第 ${weekNow} 周 · 周${WEEKDAY_SHORT[weekdayNow - 1] || ""}`
-                  : snap?.semester
-                    ? `周${WEEKDAY_SHORT[weekdayNow - 1] || ""}`
-                    : "已登录"
-                : "未登录"}
+            <div className={`week${offline ? " offline" : ""}`}>
+              {offline
+                ? "离线状态"
+                : loggedIn
+                  ? weekNow
+                    ? `第 ${weekNow} 周 · 周${WEEKDAY_SHORT[weekdayNow - 1] || ""}`
+                    : snap?.semester
+                      ? `周${WEEKDAY_SHORT[weekdayNow - 1] || ""}`
+                      : "已登录"
+                  : "未登录"}
             </div>
             <PinBtn />
             <button
@@ -1102,7 +1232,10 @@ export default function App() {
             </div>
           ) : (
             <>
-              {(!loggedIn || authMsg) && (
+              {offline && (
+                <div className="offline-banner">离线状态 · 显示上次缓存</div>
+              )}
+              {!offline && (!loggedIn || authMsg) && (
                 <div className="err">
                   {authMsg || "会话已失效，换了网络需要重新登录"}
                   <br />
@@ -1170,17 +1303,32 @@ export default function App() {
               </div>
               <div className="sec-title">
                 <span>今日</span>
-                <button
-                  className="text-btn"
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSemWeek(weekNow || 1);
-                    openOverlay("semester");
-                  }}
-                >
-                  学期 ›
-                </button>
+                <span className="sec-actions">
+                  <button
+                    className="icon-btn plus"
+                    type="button"
+                    title="添加日程"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEvent(null);
+                    }}
+                  >
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <path fill="currentColor" d="M7.2 3.2h1.6v4h4v1.6h-4v4H7.2v-4h-4V7.2h4z" />
+                    </svg>
+                  </button>
+                  <button
+                    className="text-btn"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSemWeek(weekNow || 1);
+                      openOverlay("semester");
+                    }}
+                  >
+                    日程 ›
+                  </button>
+                </span>
               </div>
               {!snap?.semester && snap?.errors.course ? (
                 <div className="err">
@@ -1190,36 +1338,55 @@ export default function App() {
                   <br />
                   <button className="retry" type="button" onClick={() => doSyncCourses()}>重试</button>
                 </div>
-              ) : refreshUi === "spin" && !snap?.semester ? (
+              ) : courseSync === "spin" && !snap?.semester ? (
                 <div className="empty">正在同步课表…</div>
-              ) : !snap?.semester ? (
+              ) : !snap?.semester && todayMix.length === 0 ? (
                 <div className="empty">教务还没有本学期课表。军训结束、选课落定后再刷新。</div>
-              ) : snap.semester.courses.length === 0 ? (
+              ) : snap?.semester && snap.semester.courses.length === 0 && todayMix.length === 0 ? (
                 <div className="empty">教务还没有本学期课表。军训结束、选课落定后再刷新。</div>
-              ) : todayRows.length === 0 ? (
+              ) : todayDone ? (
+                <>
+                  <div className="done-note">今日课程已上完</div>
+                  {remainingTodayEvents.length ? (
+                    <div className="course">
+                      {remainingTodayEvents.map((r) => (
+                        <MixRowView key={r.key} row={r} onEvent={() => r.event && openEvent(r.event)} />
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="sec-title sub">
+                    <span>明日</span>
+                  </div>
+                  {tomorrowMix.length === 0 ? (
+                    <div className="empty">明日没有课</div>
+                  ) : (
+                    <div className="course">
+                      {tomorrowMix.map((r) => (
+                        <MixRowView
+                          key={r.key}
+                          row={{ ...r, kind: "later", label: r.type === "event" ? "日程" : "明天" }}
+                          onEvent={() => r.event && openEvent(r.event)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : todayMix.length === 0 ? (
                 <div className="empty">今天洞里没课</div>
               ) : (
                 <div className="course">
-                  {todayRows.map(({ course: c, kind, label }) => (
-                    <div className={`row ${kind === "later" ? "" : kind}`} key={`${c.name}-${c.start}-${c.place}`}>
-                      <div className="when">
-                        <span className="num">{c.start}–{c.end}</span>
-                        <span>{label}</span>
-                      </div>
-                      <div className="cname">
-                        {c.name}
-                        <span className="place">{courseMeta(c)}</span>
-                      </div>
-                    </div>
+                  {todayMix.map((r) => (
+                    <MixRowView key={r.key} row={r} onEvent={() => r.event && openEvent(r.event)} />
                   ))}
                 </div>
               )}
               <div className="foot">
-                {snap?.fetchedAt ? new Date(snap.fetchedAt).toLocaleTimeString() + " 同步" : "尚未同步"}
+                {offline ? "离线状态" : snap?.fetchedAt ? new Date(snap.fetchedAt).toLocaleTimeString() + " 同步" : "尚未同步"}
+                {offline && snap?.fetchedAt ? ` · 上次 ${new Date(snap.fetchedAt).toLocaleTimeString()}` : ""}
                 {clockOverridden ? " · 测试时钟" : ""}
-                {snap?.network === "campus"
+                {!offline && snap?.network === "campus"
                   ? " · 校园网直连"
-                  : snap?.network === "offcampus"
+                  : !offline && snap?.network === "offcampus"
                     ? " · 校外"
                     : ""}
                 {err ? ` · ${err}` : ""}
@@ -1288,7 +1455,7 @@ export default function App() {
           </div>
           <div className="about-doc">
             <div className="about-name">泥洞</div>
-            <div className="about-ver">v1.0.1</div>
+            <div className="about-ver">v1.2.0</div>
             <p>东北大学桌面看板，致力于解决官方平台不便捷的问题。</p>
             <p className="about-meta">作者 sapphire_fic</p>
           </div>
@@ -1370,12 +1537,25 @@ export default function App() {
       {(expanded || panelIn) && view === "semester" && (
         <div className="panel">
           <div className="bill-head drag">
-            <button className="back" onClick={() => closeOverlay()}>‹ 学期课表</button>
+            <button className="back" onClick={() => closeOverlay()}>‹ 日程</button>
             <div className="month-nav">
               <button type="button" onClick={() => setSemWeek((w) => Math.max(1, w - 1))} disabled={semWeek <= 1}>‹</button>
               <span>第 {semWeek} 周</span>
               <button type="button" onClick={() => setSemWeek((w) => Math.min(semMax, w + 1))} disabled={semWeek >= semMax}>›</button>
             </div>
+            <button
+              className="icon-btn plus"
+              type="button"
+              title="添加日程"
+              onClick={(e) => {
+                e.stopPropagation();
+                openEvent(null);
+              }}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path fill="currentColor" d="M7.2 3.2h1.6v4h4v1.6h-4v4H7.2v-4h-4V7.2h4z" />
+              </svg>
+            </button>
             <PinBtn />
           </div>
           {!snap?.semester && snap?.errors.course ? (
@@ -1384,7 +1564,7 @@ export default function App() {
               <br />
               <button className="retry" type="button" onClick={() => doSyncCourses()}>重试</button>
             </div>
-          ) : !snap?.semester || snap.semester.courses.length === 0 ? (
+          ) : !snap?.semester ? (
             <div className="empty">教务还没有本学期课表。军训结束、选课落定后再刷新。</div>
           ) : (
             <>
@@ -1415,8 +1595,9 @@ export default function App() {
                   const ds = datesOfTeachingWeek(week1, semWeek);
                   const d = ds[i];
                   const isToday = d && ymd(d) === ymd(now);
+                  const hasAgenda = d && agendasOnDate(snap?.agenda, ymd(d)).length > 0;
                   return (
-                    <div className={`h${isToday ? " today" : ""}`} key={w}>
+                    <div className={`h${isToday ? " today" : ""}${hasAgenda ? " has-agenda" : ""}`} key={w}>
                       {w}
                       {d ? <small>{d.getMonth() + 1}/{d.getDate()}</small> : null}
                     </div>
@@ -1445,6 +1626,39 @@ export default function App() {
                 })}
                 {cellTip ? <div className="tip" style={{ left: cellTip.x, top: cellTip.y, bottom: "auto" }}>{cellTip.text}</div> : null}
               </div>
+              {(() => {
+                const ds = datesOfTeachingWeek(week1, semWeek);
+                const weekEvents: { a: Agenda; day: Date; dow: number }[] = [];
+                for (const a of snap?.agenda || []) {
+                  for (const day of ds) {
+                    if (agendaOnDate(a, ymd(day))) {
+                      weekEvents.push({ a, day, dow: weekdayOf(day) });
+                    }
+                  }
+                }
+                weekEvents.sort((p, q) => p.dow - q.dow || p.a.start.localeCompare(q.a.start));
+                if (!weekEvents.length) {
+                  return <div className="week-agenda empty-lite">这周还没有日程，点右上角加号添加。</div>;
+                }
+                return (
+                  <div className="week-agenda">
+                    <div className="week-agenda-title">本周日程</div>
+                    {weekEvents.map(({ a, day, dow }) => (
+                      <button
+                        key={`${a.id}-${ymd(day)}`}
+                        type="button"
+                        className="week-agenda-row"
+                        onClick={() => openEvent(a)}
+                      >
+                        <span className="wa-day">周{weekdayLabel(dow)}</span>
+                        <span className="wa-time num">{a.start.slice(11, 16)}–{a.end.slice(11, 16)}</span>
+                        <span className="wa-name">{a.name}</span>
+                        {a.remind ? <span className="wa-bell" title="会提醒">●</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
               <div className="foot">
                 作息按课表自动：{majorityCampus(snap.semester.courses, semWeek) === "hunnan" ? "浑南" : "南湖"}（上午与另一校区不同）
                 {cacheLabel ? ` · 课表缓存于 ${cacheLabel}` : ""}
@@ -1453,6 +1667,20 @@ export default function App() {
             </>
           )}
         </div>
+      )}
+
+      {(expanded || panelIn) && view === "event" && (
+        <EventForm
+          key={eventNonce}
+          pin={<PinBtn />}
+          initial={editingEvent}
+          now={now}
+          busy={eventBusy}
+          err={eventErr}
+          onClose={closeOverlay}
+          onSave={saveEvent}
+          onDelete={editingEvent?.id ? deleteEvent : undefined}
+        />
       )}
 
       {(expanded || panelIn) && view === "login" && (
@@ -1589,13 +1817,16 @@ export default function App() {
           }}
           semester={snap?.semester}
           cacheLabel={cacheLabel}
+          courseSync={courseSync}
+          courseSyncErr={courseSyncErr}
+          offline={offline}
           onClose={closeOverlay}
           onSync={() => doSyncCourses()}
           onLogout={async () => {
             setBusy(false);
             try { await api.logout(); } catch { /* ignore */ }
             if (!remember) setPass("");
-            setSnap({ fetchedAt: "", network: "unknown", loggedIn: false, errors: {} });
+            setSnap({ fetchedAt: "", network: "unknown", loggedIn: false, offline: false, agenda: [], errors: {} });
             pinBeforeOverlay.current = null;
             setPinned(true);
             setView("login");

@@ -1,6 +1,7 @@
 use crate::course::{
     build_semester, catalog_has_courses, enrich_from_catalog, looks_like_login_page,
-    parse_arranged_list, parse_calendars, parse_courses, parse_scheduled_campus,
+    merge_weekly_stamped, parse_arranged_list, parse_calendars, parse_courses,
+    parse_scheduled_campus, parse_term_weeks, stamp_courses_week, week_param_filters,
 };
 use crate::crypto::{self, DEFAULT_PUB_B64};
 use crate::error::{AppError, Result};
@@ -1302,36 +1303,147 @@ impl NeuClient {
             Ok(v) => parse_scheduled_campus(&v),
             Err(_) => None,
         };
+        let term_weeks = match self
+            .jwxt_get(&format!(
+                "/api/home/getTermWeeks.do?termCode={}",
+                urlencoding::encode(&term)
+            ))
+            .await
+        {
+            Ok(v) => parse_term_weeks(&v),
+            Err(_) => Vec::new(),
+        };
         let mut courses = parse_courses(&arranged, scheduled);
-        let mut catalog = None;
-        for q in [
-            format!(
-                "/api/home/student/courses.do?termCode={}",
-                urlencoding::encode(&term)
-            ),
-            format!(
-                "/api/home/student/courses.do?XNXQDM={}",
-                urlencoding::encode(&term)
-            ),
-        ] {
-            if let Ok(v) = self.jwxt_get(&q).await {
-                if catalog_has_courses(&v) {
-                    catalog = Some(v);
-                    break;
-                }
-                if catalog.is_none() {
-                    catalog = Some(v);
+        if let Some(weekly) = self
+            .fetch_weekly_courses(&term, scheduled, &arranged, &term_weeks)
+            .await
+        {
+            courses = weekly;
+        } else {
+            let mut catalog = None;
+            for q in [
+                format!(
+                    "/api/home/student/courses.do?termCode={}",
+                    urlencoding::encode(&term)
+                ),
+                format!(
+                    "/api/home/student/courses.do?XNXQDM={}",
+                    urlencoding::encode(&term)
+                ),
+            ] {
+                if let Ok(v) = self.jwxt_get(&q).await {
+                    if catalog_has_courses(&v) {
+                        catalog = Some(v);
+                        break;
+                    }
+                    if catalog.is_none() {
+                        catalog = Some(v);
+                    }
                 }
             }
-        }
-        if let Some(cat) = catalog {
-            courses = enrich_from_catalog(courses, &cat);
+            if let Some(cat) = catalog {
+                courses = enrich_from_catalog(courses, &cat);
+            }
         }
         Ok(build_semester(
             cal,
             courses,
             Local::now().to_rfc3339(),
+            term_weeks,
         ))
+    }
+
+    async fn fetch_week_arranged(&self, term: &str, week: u32) -> Option<Vec<serde_json::Value>> {
+        let q = format!(
+            "/api/home/student/getMyScheduleDetail.do?termCode={}&type=week&week={}",
+            urlencoding::encode(term),
+            week
+        );
+        let v = self.jwxt_get(&q).await.ok()?;
+        Some(parse_arranged_list(&v))
+    }
+
+    /// 网页「周课表」会带 week 参数；服务端按教学周筛格子。同步时拉 1..N 周各一次，
+    /// 用点名结果当 weeks[]，不再猜中文。日常刷新仍不打教务。
+    async fn fetch_weekly_courses(
+        &self,
+        term: &str,
+        scheduled: Option<crate::periods::Campus>,
+        full: &[serde_json::Value],
+        term_weeks: &[crate::models::TermWeek],
+    ) -> Option<Vec<Course>> {
+        if full.is_empty() {
+            return None;
+        }
+        let probe = term_weeks
+            .iter()
+            .find(|w| {
+                crate::clock::today()
+                    .format("%Y-%m-%d")
+                    .to_string()
+                    .as_str()
+                    >= w.start.get(..10).unwrap_or(&w.start)
+                    && crate::clock::today()
+                        .format("%Y-%m-%d")
+                        .to_string()
+                        .as_str()
+                        <= w.end.get(..10).unwrap_or(&w.end)
+            })
+            .map(|w| w.n)
+            .or_else(|| term_weeks.iter().map(|w| w.n).find(|n| *n >= 3))
+            .unwrap_or(5);
+        let weekly = self.fetch_week_arranged(term, probe).await?;
+        if !week_param_filters(full, &weekly) {
+            return None;
+        }
+        let mut serials: Vec<u32> = term_weeks
+            .iter()
+            .map(|w| w.n)
+            .filter(|n| (1..=22).contains(n))
+            .collect();
+        if serials.is_empty() {
+            serials = (1..=18).collect();
+        }
+        let mut parts: Vec<Vec<Course>> = Vec::new();
+        for chunk in serials.chunks(3) {
+            match chunk {
+                [a, b, c] => {
+                    let (ra, rb, rc) = tokio::join!(
+                        self.fetch_week_arranged(term, *a),
+                        self.fetch_week_arranged(term, *b),
+                        self.fetch_week_arranged(term, *c),
+                    );
+                    for (w, hit) in [(*a, ra), (*b, rb), (*c, rc)] {
+                        if let Some(items) = hit {
+                            parts.push(stamp_courses_week(parse_courses(&items, scheduled), w));
+                        }
+                    }
+                }
+                [a, b] => {
+                    let (ra, rb) = tokio::join!(
+                        self.fetch_week_arranged(term, *a),
+                        self.fetch_week_arranged(term, *b),
+                    );
+                    for (w, hit) in [(*a, ra), (*b, rb)] {
+                        if let Some(items) = hit {
+                            parts.push(stamp_courses_week(parse_courses(&items, scheduled), w));
+                        }
+                    }
+                }
+                [a] => {
+                    if let Some(items) = self.fetch_week_arranged(term, *a).await {
+                        parts.push(stamp_courses_week(parse_courses(&items, scheduled), *a));
+                    }
+                }
+                _ => {}
+            }
+        }
+        let merged = merge_weekly_stamped(parts);
+        if merged.is_empty() {
+            None
+        } else {
+            Some(merged)
+        }
     }
 }
 

@@ -27,7 +27,7 @@ const PAGES: { id: Page; title: string; desc: string; icon: ReactNode }[] = [
   {
     id: "schedule",
     title: "课表",
-    desc: "第一周周一、重新同步",
+    desc: "第一周周一、同步课表",
     icon: (
       <svg viewBox="0 0 16 16" aria-hidden="true">
         <path fill="currentColor" d="M4 2.5h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2zm0 3.5v7.5h8V6H4zm1.5-3h1v2h-1v-2zm4 0h1v2h-1v-2z" />
@@ -286,12 +286,15 @@ export function SettingsPanel(props: {
   setSettings: (s: AppSettings) => void;
   semester?: SemesterTable;
   cacheLabel: string;
+  courseSync: "idle" | "spin" | "ok" | "fail";
+  courseSyncErr?: string;
+  offline?: boolean;
   onClose: () => void;
   onSync: () => void;
   onLogout: () => void;
   onPreviewRemind: () => void;
 }) {
-  const { pin, settings, setSettings, semester, cacheLabel, onClose, onSync, onLogout, onPreviewRemind } = props;
+  const { pin, settings, setSettings, semester, cacheLabel, courseSync, courseSyncErr, offline, onClose, onSync, onLogout, onPreviewRemind } = props;
   const [page, setPage] = useState<Page>("hub");
   const title = page === "hub" ? "设置" : PAGES.find((p) => p.id === page)?.title || "设置";
   const back = () => {
@@ -376,10 +379,31 @@ export function SettingsPanel(props: {
             {semester?.week1Monday ? `（${semester.week1Monday.replace(/-/g, "·")}）` : ""}
             ，用来算「第几周」。
           </p>
-          <div className="cache-line">
+          <div className={`cache-line ${courseSync === "spin" ? "syncing" : ""} ${courseSync === "ok" ? "synced" : ""}`}>
             <span>{cacheLabel ? `课表 · ${cacheLabel}已缓存` : "课表 · 尚未同步"}</span>
-            <button className="link" type="button" onClick={onSync}>重新同步</button>
+            {courseSync === "spin" ? (
+              <span className="sync-status spin">
+                <i className="sync-ico" aria-hidden="true" />
+                同步中
+              </span>
+            ) : courseSync === "ok" ? (
+              <span className="sync-status ok">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M6.3 11.1 3.2 8l.9-.9 2.2 2.2 5.6-5.6.9.9z"/></svg>
+                已同步
+              </span>
+            ) : (
+              <button
+                className={`link ${courseSync === "fail" ? "fail" : ""}`}
+                type="button"
+                disabled={offline}
+                onClick={onSync}
+              >
+                {offline ? "离线" : courseSync === "fail" ? "重试同步" : "重新同步"}
+              </button>
+            )}
           </div>
+          {courseSync === "fail" && courseSyncErr ? <p className="hint warn">{courseSyncErr}</p> : null}
+          {offline ? <p className="hint">离线时不能打教务，连上网络后再同步。</p> : null}
         </div>
       )}
 

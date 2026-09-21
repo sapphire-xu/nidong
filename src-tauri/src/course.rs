@@ -1,6 +1,10 @@
 //! jwxt 整学期课表：解析、缓存、今日/周次推导。
+//!
+//! 网页周课表会打 `getMyScheduleDetail.do?type=week&week=n`，服务端按教学周筛格子。
+//! 同步时按周拉齐，用点名结果当 `weeks[]`。金智 `wdkb`/`SKZC` 在东大未开通。
+//! 周参数无效时回退：格子全文优先于 `weeksAndTeachers`；单/双只修饰紧挨着的周段。
 
-use crate::models::{Course, SemesterTable, Snapshot};
+use crate::models::{Course, SemesterTable, Snapshot, TermWeek};
 use crate::periods::{
     majority_campus, resolve_campus, times_for, Campus,
 };
@@ -196,6 +200,124 @@ pub fn teaching_week(week1_monday: &str, today: NaiveDate) -> Option<u32> {
     Some((days / 7 + 1) as u32)
 }
 
+pub fn teaching_week_from_term(weeks: &[TermWeek], today: NaiveDate) -> Option<u32> {
+    let t = today.format("%Y-%m-%d").to_string();
+    for w in weeks {
+        if w.n == 0 {
+            continue;
+        }
+        let s = w.start.get(..10).unwrap_or(&w.start);
+        let e = w.end.get(..10).unwrap_or(&w.end);
+        if t.as_str() >= s && t.as_str() <= e {
+            return Some(w.n);
+        }
+    }
+    None
+}
+
+pub fn parse_term_weeks(v: &Value) -> Vec<TermWeek> {
+    let arr = walk_array(v, &["datas", "weeks", "rows", "list", "schoolCalendars"]);
+    let Some(arr) = arr else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for item in arr {
+        let n = json_u32(
+            item,
+            &["serialNumber", "week", "zc", "ZC", "SKZC", "name"],
+        )
+        .or_else(|| {
+            json_str(item, &["name", "itemName"]).and_then(|s| {
+                let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+                digits.parse().ok()
+            })
+        });
+        let Some(n) = n.filter(|n| (1..=30).contains(n)) else {
+            continue;
+        };
+        let start = json_str(item, &["startDate", "KSRQ", "beginDate", "XQKSRQ"])
+            .and_then(|s| parse_ymd(&s))
+            .map(|d| d.format("%Y-%m-%d").to_string())
+            .unwrap_or_default();
+        let end = json_str(item, &["endDate", "JSRQ", "XQJSRQ"])
+            .and_then(|s| parse_ymd(&s))
+            .map(|d| d.format("%Y-%m-%d").to_string())
+            .unwrap_or_default();
+        out.push(TermWeek { n, start, end });
+    }
+    out.sort_by_key(|w| w.n);
+    out.dedup_by_key(|w| w.n);
+    out
+}
+
+fn arranged_item_key(it: &Value) -> String {
+    format!(
+        "{}|{}|{}|{}",
+        json_str(it, &["courseName", "KCMC", "kcmc", "name"]).unwrap_or_default(),
+        json_str(it, &["dayOfWeek", "SKXQ", "weekday"]).unwrap_or_default(),
+        json_u32(it, &["beginSection", "KSJC"]).unwrap_or(0),
+        json_u32(it, &["endSection", "JSJC"]).unwrap_or(0)
+    )
+}
+
+/// 带 `week=` 的格子课表若被服务端筛过，条数或课集合会与整学期不同。
+pub fn week_param_filters(full: &[Value], weekly: &[Value]) -> bool {
+    if weekly.is_empty() {
+        return !full.is_empty();
+    }
+    if weekly.len() != full.len() {
+        return true;
+    }
+    let a: std::collections::BTreeSet<_> = full.iter().map(arranged_item_key).collect();
+    let b: std::collections::BTreeSet<_> = weekly.iter().map(arranged_item_key).collect();
+    a != b
+}
+
+pub fn stamp_courses_week(mut courses: Vec<Course>, week: u32) -> Vec<Course> {
+    for c in &mut courses {
+        c.weeks = Some(vec![week]);
+    }
+    courses
+}
+
+fn place_merge_key(p: &str) -> String {
+    let t = tidy_place(p);
+    if place_has_room(&t) {
+        t
+    } else {
+        String::new()
+    }
+}
+
+/// 把「第 n 周接口返回的课」合成学期表：周次以服务端点名为准，地点不同则拆开。
+pub fn merge_weekly_stamped(parts: Vec<Vec<Course>>) -> Vec<Course> {
+    let mut map: Vec<Course> = Vec::new();
+    for cs in parts {
+        for c in cs {
+            if let Some(ex) = map.iter_mut().find(|x| {
+                names_eq(&x.name, &c.name)
+                    && x.weekday == c.weekday
+                    && x.sections == c.sections
+                    && place_merge_key(&x.place) == place_merge_key(&c.place)
+                    && x.teacher == c.teacher
+            }) {
+                let mut set: std::collections::BTreeSet<u32> =
+                    ex.weeks.clone().unwrap_or_default().into_iter().collect();
+                if let Some(ws) = &c.weeks {
+                    set.extend(ws.iter().copied());
+                }
+                ex.weeks = Some(set.into_iter().collect());
+                if !place_has_room(&ex.place) && place_has_room(&c.place) {
+                    ex.place = c.place;
+                }
+            } else {
+                map.push(c);
+            }
+        }
+    }
+    map
+}
+
 pub fn weekday_of(today: NaiveDate) -> u8 {
     match today.weekday() {
         Weekday::Mon => 1,
@@ -240,7 +362,19 @@ pub fn apply_semester(snap: &mut Snapshot, mut sem: SemesterTable, week1_overrid
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or(&sem.week1_monday);
-    let week = if week1.is_empty() {
+    let user_set_week1 = week1_override
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .is_some();
+    let week = if !user_set_week1 {
+        if let Some(w) = teaching_week_from_term(&sem.term_weeks, today) {
+            Some(w)
+        } else if week1.is_empty() {
+            teaching_week(&default_week1(&sem.semester_id), today)
+        } else {
+            teaching_week(week1, today)
+        }
+    } else if week1.is_empty() {
         teaching_week(&default_week1(&sem.semester_id), today)
     } else {
         teaching_week(week1, today)
@@ -506,55 +640,88 @@ fn looks_like_teacher(s: &str) -> bool {
     n >= 2 && n <= 16 && !t.chars().any(|c| c.is_ascii_digit())
 }
 
-fn week_parity(expr: &str, after: &str) -> (bool, bool) {
-    let t = after.trim_start();
-    if expr.contains("单周")
-        || expr.contains("(单)")
-        || expr.contains("（单）")
-        || t.starts_with("单周")
-        || t.starts_with("(单)")
-        || t.starts_with("（单）")
-    {
-        return (true, false);
+fn take_parity_prefix(s: &str) -> (bool, bool, &str) {
+    let trimmed = s.trim_start();
+    let lead = s.len() - trimmed.len();
+    let eat = |p: &str| trimmed.strip_prefix(p).map(|_| &s[lead + p.len()..]);
+    if let Some(rest) = eat("(单)").or_else(|| eat("（单）")).or_else(|| eat("单周")) {
+        return (true, false, rest);
     }
-    if expr.contains("双周")
-        || expr.contains("(双)")
-        || expr.contains("（双）")
-        || t.starts_with("双周")
-        || t.starts_with("(双)")
-        || t.starts_with("（双）")
-    {
-        return (false, true);
+    if let Some(rest) = eat("(双)").or_else(|| eat("（双）")).or_else(|| eat("双周")) {
+        return (false, true, rest);
     }
-    (false, false)
+    (false, false, s)
 }
 
-fn parse_week_expr(expr: &str, odd: bool, even: bool) -> Vec<u32> {
-    let re = regex::Regex::new(r"(\d{1,2})\s*[-~—至到]\s*(\d{1,2})|(\d{1,2})").unwrap();
-    let mut set = std::collections::BTreeSet::new();
-    for cap in re.captures_iter(expr) {
-        let (lo, hi) = if let (Some(a), Some(b)) = (cap.get(1), cap.get(2)) {
-            let lo: u32 = a.as_str().parse().unwrap_or(0);
-            let hi: u32 = b.as_str().parse().unwrap_or(0);
-            (lo.min(hi), lo.max(hi))
-        } else if let Some(n) = cap.get(3) {
-            let n: u32 = n.as_str().parse().unwrap_or(0);
-            (n, n)
-        } else {
+fn expand_week_range(lo: u32, hi: u32, odd: bool, even: bool) -> Vec<u32> {
+    let (lo, hi) = (lo.min(hi), lo.max(hi).min(22));
+    let mut out = Vec::new();
+    for w in lo..=hi {
+        if w == 0 {
             continue;
-        };
-        for w in lo..=hi.min(22) {
-            if w == 0 {
-                continue;
-            }
-            if odd && w % 2 == 0 {
-                continue;
-            }
-            if even && w % 2 == 1 {
-                continue;
-            }
-            set.insert(w);
         }
+        if odd && w % 2 == 0 {
+            continue;
+        }
+        if even && w % 2 == 1 {
+            continue;
+        }
+        out.push(w);
+    }
+    out
+}
+
+/// 「3-8周,11-13周(单)」里的单/双只作用在紧挨着的那段，不是整串。
+fn parse_week_expr_per_range(expr: &str, after: &str) -> Vec<u32> {
+    let re = regex::Regex::new(r"(\d{1,2})(?:\s*[-~—至到]\s*(\d{1,2}))?").unwrap();
+    let mut atoms: Vec<(u32, u32, bool, bool)> = Vec::new();
+    let mut pos = 0;
+    while pos < expr.len() {
+        let slice = &expr[pos..];
+        let skip: usize = slice
+            .chars()
+            .take_while(|c| *c == ',' || *c == '，' || *c == '、' || c.is_whitespace())
+            .map(|c| c.len_utf8())
+            .sum();
+        if skip > 0 {
+            pos += skip;
+            continue;
+        }
+        let Some(cap) = re.captures(slice) else { break };
+        let m = cap.get(0).unwrap();
+        if m.start() != 0 {
+            break;
+        }
+        let lo: u32 = cap.get(1).unwrap().as_str().parse().unwrap_or(0);
+        let hi: u32 = cap
+            .get(2)
+            .and_then(|x| x.as_str().parse().ok())
+            .unwrap_or(lo);
+        pos += m.end();
+        if let Some(rest) = expr.get(pos..) {
+            let t = rest.trim_start();
+            let pad = rest.len() - t.len();
+            if t.starts_with('周') {
+                pos += pad + '周'.len_utf8();
+            }
+        }
+        let rest = expr.get(pos..).unwrap_or("");
+        let (odd, even, rest2) = take_parity_prefix(rest);
+        pos += rest.len() - rest2.len();
+        if lo > 0 {
+            atoms.push((lo.min(hi), lo.max(hi), odd, even));
+        }
+    }
+    if let Some(last) = atoms.last_mut() {
+        if !last.2 && !last.3 {
+            let (odd, even, _) = take_parity_prefix(after);
+            last.2 = odd;
+            last.3 = even;
+        }
+    }
+    let mut set = std::collections::BTreeSet::new();
+    for (lo, hi, odd, even) in atoms {
+        set.extend(expand_week_range(lo, hi, odd, even));
     }
     set.into_iter().collect()
 }
@@ -563,10 +730,8 @@ fn week_chunks(s: &str) -> Vec<Vec<u32>> {
     let re = week_expr_re();
     let mut out = Vec::new();
     for cap in re.captures_iter(s) {
-        let expr = cap.get(0).map(|m| m.as_str()).unwrap_or("");
-        let after_idx = cap.get(0).map(|m| m.end()).unwrap_or(0);
-        let (odd, even) = week_parity(expr, s.get(after_idx..).unwrap_or(""));
-        let weeks = parse_week_expr(expr, odd, even);
+        let m = cap.get(0).unwrap();
+        let weeks = parse_week_expr_per_range(m.as_str(), s.get(m.end()..).unwrap_or(""));
         if !weeks.is_empty() {
             out.push(weeks);
         }
@@ -574,11 +739,14 @@ fn week_chunks(s: &str) -> Vec<Vec<u32>> {
     if out.is_empty() {
         // 「1-16」这种没有「周」的校历字段，但不要解析含校区/教室的句子
         if !s.contains("校区") && !s.contains('号') && !s.contains('楼') && !s.contains('室') {
-            let compact: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-            let odd = compact.contains("单");
-            let even = compact.contains("双") && !compact.contains("单");
-            if s.contains('-') || s.contains('~') || s.contains(',') || s.contains('，') {
-                let weeks = parse_week_expr(s, odd, even);
+            if s.contains('-')
+                || s.contains('~')
+                || s.contains(',')
+                || s.contains('，')
+                || s.contains('单')
+                || s.contains('双')
+            {
+                let weeks = parse_week_expr_per_range(s, "");
                 if !weeks.is_empty() {
                     out.push(weeks);
                 }
@@ -826,21 +994,111 @@ fn extract_place(s: &str) -> Option<String> {
                 .and_then(|re| re.find(s).map(|m| m.start()))
         })?;
     let rest = s[pos..].trim();
-    let mut stop = rest
-        .find('\n')
-        .or_else(|| rest.find('<'))
-        .unwrap_or(rest.len());
+    let mut stop = rest.find('<').unwrap_or(rest.len());
     if let Some(m) = week_expr_re().find(rest) {
         if m.start() > 0 {
             stop = stop.min(m.start());
         }
     }
-    let p = rest[..stop].trim().trim_end_matches(['/', '；', ';', '、']);
+    for k in ["考试", "考查", "百分制", "五级制"] {
+        if let Some(i) = rest.find(k) {
+            if i > 0 {
+                stop = stop.min(i);
+            }
+        }
+    }
+    let p = rest[..stop].trim().trim_end_matches(['/', '；', ';', '、', ' ']);
     if p.chars().count() >= 2 {
         Some(p.to_string())
     } else {
         None
     }
+}
+
+fn looks_like_room_fragment(s: &str) -> bool {
+    let t = s.trim();
+    if t.is_empty() || t.chars().count() > 24 {
+        return false;
+    }
+    if week_expr_re().is_match(t) {
+        return false;
+    }
+    if t.contains("考试")
+        || t.contains("考查")
+        || t.contains("百分制")
+        || t.contains("五级制")
+        || t.contains('类')
+        || t.contains('班')
+    {
+        return false;
+    }
+    if regex::Regex::new(r"^[A-Za-z]\d{1,4}(?:\s*[-－].{0,16})?$")
+        .map(|re| re.is_match(t))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    if t.contains('室') || t.contains('楼') || t.contains("微机") || t.contains("语音") {
+        return true;
+    }
+    regex::Regex::new(r"^\d{1,2}号[A-Za-z]?\d{0,4}")
+        .map(|re| re.is_match(t) && !t.contains('周'))
+        .unwrap_or(false)
+}
+
+fn join_wrapped_schedule_lines(lines: &[String]) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for line in lines {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if let Some(prev) = out.last_mut() {
+            if looks_like_room_fragment(t)
+                && (week_expr_re().is_match(prev)
+                    || prev.contains("校区")
+                    || prev.trim_end().ends_with('号'))
+            {
+                prev.push(' ');
+                prev.push_str(t);
+                continue;
+            }
+        }
+        out.push(t.to_string());
+    }
+    out.join("\n")
+}
+
+fn place_has_room(p: &str) -> bool {
+    let t = tidy_place(p);
+    let t = t.trim();
+    !t.is_empty() && !matches!(t, "浑南校区" | "南湖校区" | "浑南" | "南湖")
+}
+
+fn resolve_seg_place(cell_place: &str, seg: &WeekSeg, multi: bool, sibling_has_room: bool) -> String {
+    let seg_p = seg
+        .place
+        .as_deref()
+        .map(tidy_place)
+        .filter(|p| !p.is_empty());
+    if multi {
+        if let Some(p) = seg_p {
+            if place_has_room(&p) {
+                return p;
+            }
+            return String::new();
+        }
+        if sibling_has_room {
+            return String::new();
+        }
+        return cell_place.to_string();
+    }
+    if let Some(p) = seg_p {
+        if place_has_room(&p) || cell_place.is_empty() {
+            return p;
+        }
+    }
+    cell_place.to_string()
 }
 
 /// 把「14-15周 薛丽芳 浑南校区1号B409」拆成多段，每段自己的周次和老师。
@@ -851,6 +1109,12 @@ fn split_week_segments(s: &str) -> Vec<WeekSeg> {
         .replace("<br>", "\n")
         .replace("；", "\n")
         .replace(';', "\n");
+    let lines: Vec<String> = s
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let s = join_wrapped_schedule_lines(&lines);
     let re = week_expr_re();
     let matches: Vec<regex::Match> = re.find_iter(&s).collect();
     if matches.len() >= 2 || (matches.len() == 1 && (s.contains("校区") || s.contains('\n'))) {
@@ -880,7 +1144,10 @@ fn split_week_segments(s: &str) -> Vec<WeekSeg> {
 }
 
 fn tidy_place(p: &str) -> String {
-    let orig = p.trim().to_string();
+    let orig = p.trim().replace(['\n', '\r', '\t'], " ");
+    let orig = regex::Regex::new(r"\s+")
+        .map(|re| re.replace_all(&orig, " ").into_owned())
+        .unwrap_or(orig);
     let mut s = orig.clone();
     let mut campus_only: Option<&str> = None;
     for prefix in ["浑南校区", "南湖校区"] {
@@ -895,6 +1162,9 @@ fn tidy_place(p: &str) -> String {
         }
     }
     let s = s.trim_start_matches(['/', '-', ' ']).trim().to_string();
+    let s = regex::Regex::new(r"号\s+")
+        .map(|re| re.replace_all(&s, "号").into_owned())
+        .unwrap_or(s);
     if s.is_empty() {
         campus_only.unwrap_or("").to_string()
     } else {
@@ -940,12 +1210,6 @@ fn apply_seg_to_course(c: &mut Course, seg: &WeekSeg) {
         c.teacher = Some(t);
     } else {
         c.teacher = sanitize_teacher(c.teacher.clone());
-    }
-    if let Some(p) = &seg.place {
-        let p = tidy_place(p);
-        if !p.is_empty() {
-            c.place = p;
-        }
     }
 }
 
@@ -1059,11 +1323,21 @@ pub fn enrich_from_catalog(mut courses: Vec<Course>, catalog: &Value) -> Vec<Cou
                 })
         });
         if let Some(t) = template {
+            let multi = slots.len() > 1;
+            let sibling_has_room = slots.iter().any(|s| {
+                s.place
+                    .as_ref()
+                    .map(|p| place_has_room(&tidy_place(p)))
+                    .unwrap_or(false)
+            });
+            let cell_place = t.place.clone();
             for slot in slots {
                 let mut c = t.clone();
                 c.weekday = key.weekday;
                 c.sections = Some((key.begin, key.end));
-                apply_seg_to_course(&mut c, &slot_to_seg(&slot));
+                let seg = slot_to_seg(&slot);
+                apply_seg_to_course(&mut c, &seg);
+                c.place = resolve_seg_place(&cell_place, &seg, multi, sibling_has_room);
                 kept.push(c);
             }
         }
@@ -1244,28 +1518,53 @@ fn weekday_of_item(item: &Value) -> Option<u8> {
     .filter(|n| (1..=7).contains(n))
 }
 
-fn title_detail_segs(item: &Value) -> Vec<WeekSeg> {
+fn collect_text_lines(item: &Value, key: &str, from_obj_text: bool) -> Vec<String> {
     let mut lines = Vec::new();
-    if let Some(arr) = item.get("titleDetail").and_then(|x| x.as_array()) {
+    if let Some(arr) = item.get(key).and_then(|x| x.as_array()) {
         for x in arr {
             if let Some(s) = x.as_str() {
                 lines.push(s.to_string());
-            }
-        }
-    }
-    if lines.is_empty() {
-        if let Some(arr) = item.get("cellDetail").and_then(|x| x.as_array()) {
-            for x in arr {
+            } else if from_obj_text {
                 if let Some(s) = x.get("text").and_then(|t| t.as_str()) {
                     lines.push(s.to_string());
                 }
             }
         }
     }
-    if lines.is_empty() {
-        return Vec::new();
+    lines
+}
+
+fn richer_week_segs(a: Vec<WeekSeg>, b: Vec<WeekSeg>) -> Vec<WeekSeg> {
+    if a.is_empty() {
+        return b;
     }
-    split_week_segments(&lines.join("\n"))
+    if b.is_empty() {
+        return a;
+    }
+    let score = |v: &[WeekSeg]| {
+        let mut s = v.len() as i32 * 8;
+        for seg in v {
+            s += seg.weeks.len() as i32;
+            if seg.place.as_ref().is_some_and(|p| place_has_room(p)) {
+                s += 4;
+            }
+            if seg.teacher.is_some() {
+                s += 1;
+            }
+        }
+        s
+    };
+    if score(&b) > score(&a) {
+        b
+    } else {
+        a
+    }
+}
+
+fn title_detail_segs(item: &Value) -> Vec<WeekSeg> {
+    let title = split_week_segments(&collect_text_lines(item, "titleDetail", false).join("\n"));
+    let cell = split_week_segments(&collect_text_lines(item, "cellDetail", true).join("\n"));
+    richer_week_segs(title, cell)
 }
 
 pub fn parse_courses(items: &[Value], scheduled: Option<Campus>) -> Vec<Course> {
@@ -1320,9 +1619,8 @@ pub fn parse_courses(items: &[Value], scheduled: Option<Campus>) -> Vec<Course> 
                 .unwrap_or_default();
         }
         let title_segs = title_detail_segs(item);
-        if title_segs.len() > segs.len() {
-            segs = title_segs;
-        } else if segs.is_empty() && !title_segs.is_empty() {
+        // 格子全文才是完整周段；weeksAndTeachers 经常只写第一段。
+        if !title_segs.is_empty() {
             segs = title_segs;
         }
         if segs.is_empty() {
@@ -1360,21 +1658,21 @@ pub fn parse_courses(items: &[Value], scheduled: Option<Campus>) -> Vec<Course> 
             c.teacher = sanitize_teacher(c.teacher);
             draft.push((c, campus_name));
         } else {
+            let multi = segs.len() > 1;
+            let sibling_has_room = segs.iter().any(|s| {
+                s.place
+                    .as_ref()
+                    .map(|p| place_has_room(&tidy_place(p)))
+                    .unwrap_or(false)
+            });
             for seg in segs {
                 let mut c = base.clone();
-                c.weeks = Some(seg.weeks);
-                if let Some(t) = sanitize_teacher(seg.teacher) {
+                c.weeks = Some(seg.weeks.clone());
+                if let Some(t) = sanitize_teacher(seg.teacher.clone()) {
                     c.teacher = Some(t);
                 }
                 c.teacher = sanitize_teacher(c.teacher.clone());
-                if let Some(p) = seg.place {
-                    let p = tidy_place(&p);
-                    if c.place.is_empty() || p.contains("号") || p.contains("室") || p.contains("馆") {
-                        if !p.is_empty() {
-                            c.place = p;
-                        }
-                    }
-                }
+                c.place = resolve_seg_place(&base.place, &seg, multi, sibling_has_room);
                 draft.push((c, campus_name.clone()));
             }
         }
@@ -1408,6 +1706,7 @@ pub fn build_semester(
     term: CalendarHit,
     courses: Vec<Course>,
     fetched_at: String,
+    term_weeks: Vec<TermWeek>,
 ) -> SemesterTable {
     let week1 = if term.week1_monday.trim().is_empty() {
         default_week1(&term.term_code)
@@ -1420,6 +1719,7 @@ pub fn build_semester(
         week1_monday: week1,
         fetched_at,
         courses,
+        term_weeks,
     }
 }
 
@@ -1456,6 +1756,133 @@ mod tests {
             Some(vec![14, 15])
         );
         assert_eq!(parse_weeks("11周 杨晓翠 浑南校区1号B409-微机室"), Some(vec![11]));
+        // 单/双只修饰紧挨着的那段：3-8 全上，11-13 只上单周
+        assert_eq!(
+            parse_weeks("3-8周,11-13周(单)"),
+            Some(vec![3, 4, 5, 6, 7, 8, 11, 13])
+        );
+        assert_eq!(parse_weeks("10-14周(双)"), Some(vec![10, 12, 14]));
+        assert_eq!(
+            parse_weeks("3-8周(单),10-14周(双)"),
+            Some(vec![3, 5, 7, 10, 12, 14])
+        );
+        assert_eq!(
+            parse_weeks("3-8周,11-13周（单） 王爽 浑南校区 1号A204"),
+            Some(vec![3, 4, 5, 6, 7, 8, 11, 13])
+        );
+    }
+
+    #[test]
+    fn programming_basics_odd_even_unassigned_room() {
+        // 计算机类2610-12 程序设计基础：3-8 全上在 1号A204；
+        // 11-13 单周同教室；10-14 双周上课但教室未定。合起来 3-8、10-14 都有课。
+        let blob = "计算机类2610-12\n程序设计基础 A117062\n3-8周,11-13周(单) 王爽 浑南校区 1号\nA204\n10-14周(双) 王爽 浑南校区\n考试 / 百分制";
+        let segs = split_week_segments(blob);
+        assert_eq!(segs.len(), 2, "{segs:?}");
+        assert_eq!(segs[0].weeks, vec![3, 4, 5, 6, 7, 8, 11, 13]);
+        assert_eq!(segs[0].teacher.as_deref(), Some("王爽"));
+        assert!(
+            segs[0]
+                .place
+                .as_ref()
+                .map(|p| p.contains("A204"))
+                .unwrap_or(false),
+            "room wrapped onto 1号, got {:?}",
+            segs[0].place
+        );
+        assert_eq!(segs[1].weeks, vec![10, 12, 14]);
+        assert_eq!(segs[1].teacher.as_deref(), Some("王爽"));
+        assert!(
+            segs[1]
+                .place
+                .as_ref()
+                .map(|p| !p.contains("A204") && !p.contains("1号"))
+                .unwrap_or(true),
+            "even weeks must not inherit A204, got {:?}",
+            segs[1].place
+        );
+
+        let items = json!([{
+            "courseName": "程序设计基础",
+            "placeName": "1号A204",
+            "campusName": "浑南校区",
+            "dayOfWeek": 1,
+            "beginSection": 1,
+            "endSection": 2,
+            "beginTime": "08:30",
+            "endTime": "10:10",
+            "weeksAndTeachers": "3-8周,11-13周(单)[理论]/王爽[主讲]",
+            "titleDetail": [
+                "计算机类2610-12",
+                "程序设计基础 A117062",
+                "3-8周,11-13周(单) 王爽 浑南校区 1号",
+                "A204",
+                "10-14周(双) 王爽 浑南校区",
+                "考试 / 百分制"
+            ],
+            "cellDetail": [
+                {"text": "计算机类2610-12"},
+                {"text": "程序设计基础 A117062"},
+                {"text": "3-8周,11-13周(单) 王爽 浑南校区 1号"},
+                {"text": "A204"},
+                {"text": "10-14周(双) 王爽 浑南校区"},
+                {"text": "考试 / 百分制"}
+            ]
+        }]);
+        let mut cs = parse_courses(items.as_array().unwrap(), None);
+        assert_eq!(cs.len(), 2, "{:?}", cs.iter().map(|c| (&c.weeks, &c.place)).collect::<Vec<_>>());
+        let with_room = cs.iter().find(|c| c.place.contains("A204")).unwrap();
+        assert_eq!(with_room.weeks, Some(vec![3, 4, 5, 6, 7, 8, 11, 13]));
+        assert_eq!(with_room.teacher.as_deref(), Some("王爽"));
+        let no_room = cs.iter().find(|c| !c.place.contains("A204")).unwrap();
+        assert_eq!(no_room.weeks, Some(vec![10, 12, 14]));
+        assert!(
+            no_room.place.is_empty() || !place_has_room(&no_room.place),
+            "week 10/12/14 must not show 1号A204, got {:?}",
+            no_room.place
+        );
+
+        let cat = json!({
+            "code": "0",
+            "datas": [{
+                "courseName": "程序设计基础",
+                "classDateAndPlace": "3-8周,11-13周(单)[理论]/星期一/第一节-第二节/王爽[主讲]/1号A204，10-14周(双)[理论]/星期一/第一节-第二节/王爽[主讲]"
+            }]
+        });
+        cs = enrich_from_catalog(cs, &cat);
+        assert_eq!(cs.len(), 2, "{:?}", cs.iter().map(|c| (&c.weeks, &c.place)).collect::<Vec<_>>());
+        let with_room = cs.iter().find(|c| c.place.contains("A204")).unwrap();
+        assert_eq!(with_room.weeks, Some(vec![3, 4, 5, 6, 7, 8, 11, 13]));
+        let no_room = cs.iter().find(|c| !c.place.contains("A204")).unwrap();
+        assert_eq!(no_room.weeks, Some(vec![10, 12, 14]));
+        assert!(
+            no_room.place.is_empty() || !place_has_room(&no_room.place),
+            "catalog must not reattach A204 to even weeks, got {:?}",
+            no_room.place
+        );
+
+        let sem = SemesterTable {
+            semester_id: "2026-2027-1".into(),
+            label: "秋季".into(),
+            week1_monday: "2026-08-31".into(),
+            fetched_at: "".into(),
+            courses: cs,
+            term_weeks: vec![],
+        };
+        let w4 = courses_today(&sem, Some(4), 1);
+        assert_eq!(w4.len(), 1);
+        assert!(w4[0].place.contains("A204"));
+        let w9 = courses_today(&sem, Some(9), 1);
+        assert!(w9.is_empty(), "week 9 is a gap");
+        let w10 = courses_today(&sem, Some(10), 1);
+        assert_eq!(w10.len(), 1);
+        assert!(w10[0].place.is_empty() || !place_has_room(&w10[0].place));
+        let w11 = courses_today(&sem, Some(11), 1);
+        assert_eq!(w11.len(), 1);
+        assert!(w11[0].place.contains("A204"));
+        let w14 = courses_today(&sem, Some(14), 1);
+        assert_eq!(w14.len(), 1);
+        assert!(w14[0].place.is_empty() || !place_has_room(&w14[0].place));
     }
 
     #[test]
@@ -1488,6 +1915,7 @@ mod tests {
                 week1_monday: "2026-08-31".into(),
                 fetched_at: "".into(),
                 courses: cs.clone(),
+                term_weeks: vec![],
             },
             Some(2),
             3,
@@ -1500,6 +1928,7 @@ mod tests {
                 week1_monday: "2026-08-31".into(),
                 fetched_at: "".into(),
                 courses: cs,
+                term_weeks: vec![],
             },
             Some(14),
             3,
@@ -1787,6 +2216,7 @@ mod tests {
                 .unwrap(),
                 None,
             ),
+            term_weeks: vec![],
         };
         assert!(courses_today(&sem, None, 3).is_empty());
     }
@@ -1880,6 +2310,7 @@ mod tests {
                 .unwrap(),
                 None,
             ),
+            term_weeks: vec![],
         };
         let wed = courses_today(&sem, Some(2), 3);
         assert_eq!(wed.len(), 1);
@@ -1960,5 +2391,101 @@ mod tests {
             .collect();
         assert_eq!(xi.len(), 1, "xi dup {:?}", xi.iter().map(|c| &c.weeks).collect::<Vec<_>>());
         assert_eq!(xi[0].teacher.as_deref(), Some("姜耀东"));
+    }
+
+    #[test]
+    fn term_weeks_and_official_current() {
+        let v = json!({
+            "code": "0",
+            "datas": [
+                {"endDate":"2026-09-05 00:00:00","startDate":"2026-08-30 00:00:00","curWeek":false,"serialNumber":1,"name":"第1周"},
+                {"endDate":"2026-09-26 00:00:00","startDate":"2026-09-20 00:00:00","curWeek":true,"serialNumber":4,"name":"第4周"}
+            ]
+        });
+        let weeks = parse_term_weeks(&v);
+        assert_eq!(weeks[0].n, 1);
+        assert_eq!(weeks[0].start, "2026-08-30");
+        assert_eq!(
+            teaching_week_from_term(&weeks, NaiveDate::from_ymd_opt(2026, 9, 20).unwrap()),
+            Some(4)
+        );
+        // 周日按官方周，不按「周一往前推」掉到第 3 周
+        assert_eq!(
+            teaching_week("2026-08-31", NaiveDate::from_ymd_opt(2026, 9, 20).unwrap()),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn weekly_api_membership_splits_unassigned_room() {
+        let item = |place: Option<&str>, wat: &str, title_place: &str| {
+            json!({
+                "courseName": "程序设计基础",
+                "placeName": place,
+                "campusName": "浑南校区",
+                "dayOfWeek": 1,
+                "beginSection": 1,
+                "endSection": 2,
+                "beginTime": "08:30",
+                "endTime": "10:10",
+                "weeksAndTeachers": wat,
+                "titleDetail": [
+                    "计算机类2610-12",
+                    "程序设计基础 A117062",
+                    title_place,
+                    "考试 / 百分制"
+                ]
+            })
+        };
+        let w8 = parse_courses(
+            json!([item(
+                Some("1号A204"),
+                "3-8周,11-13周(单)[理论]/王爽[主讲]",
+                " 王爽 浑南校区 1号A204"
+            )])
+            .as_array()
+            .unwrap(),
+            None,
+        );
+        let w10 = parse_courses(
+            json!([item(
+                None,
+                "10-14周(双)[理论]/王爽[主讲]",
+                " 王爽 浑南校区"
+            )])
+            .as_array()
+            .unwrap(),
+            None,
+        );
+        let w11 = parse_courses(
+            json!([item(
+                Some("1号A204"),
+                "3-8周,11-13周(单)[理论]/王爽[主讲]",
+                " 王爽 浑南校区 1号A204"
+            )])
+            .as_array()
+            .unwrap(),
+            None,
+        );
+        let full = json!([
+            item(Some("1号A204"), "3-8周,11-13周(单)[理论]/王爽[主讲]", "3-8周,11-13周(单) 王爽 浑南校区 1号A204"),
+            item(None, "10-14周(双)[理论]/王爽[主讲]", "10-14周(双) 王爽 浑南校区")
+        ]);
+        let weekly8 = json!([item(Some("1号A204"), "3-8周,11-13周(单)[理论]/王爽[主讲]", " 王爽 浑南校区 1号A204")]);
+        assert!(week_param_filters(
+            full.as_array().unwrap(),
+            weekly8.as_array().unwrap()
+        ));
+        let merged = merge_weekly_stamped(vec![
+            stamp_courses_week(w8, 8),
+            stamp_courses_week(w10, 10),
+            stamp_courses_week(w11, 11),
+        ]);
+        assert_eq!(merged.len(), 2, "{:?}", merged.iter().map(|c| (&c.weeks, &c.place)).collect::<Vec<_>>());
+        let room = merged.iter().find(|c| c.place.contains("A204")).unwrap();
+        let none = merged.iter().find(|c| !c.place.contains("A204")).unwrap();
+        assert_eq!(room.weeks, Some(vec![8, 11]));
+        assert_eq!(none.weeks, Some(vec![10]));
+        assert!(none.place.is_empty() || !place_has_room(&none.place));
     }
 }

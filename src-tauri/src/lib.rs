@@ -1,3 +1,4 @@
+mod agenda;
 mod client;
 mod clock;
 mod course;
@@ -95,7 +96,13 @@ fn save_settings_file(dir: &PathBuf, s: &AppSettings) {
 }
 
 fn save_snapshot_file(dir: &PathBuf, s: &Snapshot) {
-    let _ = fs::write(dir.join("snapshot.json"), serde_json::to_vec_pretty(s).unwrap_or_default());
+    let mut disk = s.clone();
+    disk.offline = false;
+    disk.agenda = Vec::new();
+    let _ = fs::write(
+        dir.join("snapshot.json"),
+        serde_json::to_vec_pretty(&disk).unwrap_or_default(),
+    );
 }
 
 fn keyring_set(user: &str, pass: &str) -> Result<()> {
@@ -214,6 +221,8 @@ fn place_window(win: &WebviewWindow, settings: &AppSettings) {
 fn wipe_local_data(dir: &PathBuf) {
     let _ = fs::remove_file(dir.join("cookies.json"));
     let _ = fs::remove_file(dir.join("snapshot.json"));
+    let _ = fs::remove_file(dir.join("agenda.json"));
+    clear_session_open(dir);
     if let Ok(rd) = fs::read_dir(dir) {
         for e in rd.flatten() {
             let name = e.file_name();
@@ -228,9 +237,57 @@ fn wipe_local_data(dir: &PathBuf) {
     }
 }
 
+const SESSION_FLAG: &str = "session.open";
+
+fn session_is_open(dir: &PathBuf) -> bool {
+    dir.join(SESSION_FLAG).is_file()
+}
+
+fn mark_session_open(dir: &PathBuf) {
+    let _ = fs::write(dir.join(SESSION_FLAG), b"1");
+}
+
+fn clear_session_open(dir: &PathBuf) {
+    let _ = fs::remove_file(dir.join(SESSION_FLAG));
+}
+
+/// 旧版没有 session.open：有学号缓存且还留着 cookie，视为没点过退出登录。
+fn migrate_session_flag(dir: &PathBuf, snap: &Snapshot) {
+    if session_is_open(dir) {
+        return;
+    }
+    let has_user = snap
+        .username
+        .as_ref()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+    if has_user && dir.join("cookies.json").is_file() {
+        mark_session_open(dir);
+    }
+}
+
+fn attach_local(dir: &PathBuf, snap: &mut Snapshot) {
+    snap.agenda = agenda::load(dir);
+}
+
+fn apply_offline(state: &AppState) -> Snapshot {
+    let mut snap = state.snapshot.lock().unwrap().clone();
+    snap.offline = true;
+    snap.errors.auth = None;
+    if session_is_open(&state.data_dir) {
+        snap.logged_in = true;
+    }
+    attach_local(&state.data_dir, &mut snap);
+    *state.snapshot.lock().unwrap() = snap.clone();
+    snap
+}
+
 #[tauri::command]
 fn bootstrap(state: State<AppState>) -> Snapshot {
-    state.snapshot.lock().unwrap().clone()
+    let mut snap = state.snapshot.lock().unwrap().clone();
+    attach_local(&state.data_dir, &mut snap);
+    *state.snapshot.lock().unwrap() = snap.clone();
+    snap
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -340,8 +397,10 @@ fn remember_login(state: &AppState, username: &str, password: &str, remember: bo
 }
 
 fn mark_logged_in(state: &AppState, username: &str) {
+    mark_session_open(&state.data_dir);
     let mut snap = state.snapshot.lock().unwrap();
     snap.logged_in = true;
+    snap.offline = false;
     snap.username = Some(username.to_string());
     snap.errors.auth = None;
     save_snapshot_file(&state.data_dir, &snap);
@@ -363,9 +422,15 @@ fn spawn_refresh(app: AppHandle) {
         if let Some(state) = app.try_state::<AppState>() {
             match refresh_inner(&state).await {
                 Ok(snap) => {
-                    let logged = snap.logged_in;
+                    let status = if snap.offline {
+                        "idle"
+                    } else if snap.logged_in {
+                        "ok"
+                    } else {
+                        "idle"
+                    };
                     let _ = app.emit("snapshot-updated", snap);
-                    let _ = app.emit("auth-status", if logged { "ok" } else { "idle" });
+                    let _ = app.emit("auth-status", status);
                 }
                 Err(e) => {
                     let _ = app.emit("auth-status", format!("fail:{e}"));
@@ -386,6 +451,9 @@ async fn login(
 ) -> Result<LoginOutcome> {
     let remember = remember_password.unwrap_or(true);
     let auto = auto_login.unwrap_or(true);
+    if !crate::util::online() {
+        return Err("当前离线，连上网络后再登录".into());
+    }
     let client = ensure_client(&state).await?;
     let out = client.login(&username, &password).await?;
     match &out {
@@ -451,6 +519,9 @@ fn set_bills_open(state: State<AppState>, open: bool) {
 
 #[tauri::command]
 async fn refresh(state: State<'_, AppState>) -> Result<Snapshot> {
+    if !crate::util::online() {
+        return Ok(apply_offline(&state));
+    }
     refresh_inner(&state).await
 }
 
@@ -469,6 +540,7 @@ async fn load_month(state: State<'_, AppState>, year: i32, month: u32) -> Result
         let mut snap = state.snapshot.lock().unwrap();
         snap.card_spend = Some(cached);
         snap.card_month = Some(format!("{year:04}-{month:02}"));
+        attach_local(&data_dir, &mut snap);
         return Ok(snap.clone());
     }
     let bills = {
@@ -484,6 +556,7 @@ async fn load_month(state: State<'_, AppState>, year: i32, month: u32) -> Result
     snap.card_month = Some(format!("{year:04}-{month:02}"));
     snap.bills_truncated = Some(truncated);
     snap.username = user;
+    attach_local(&data_dir, &mut snap);
     save_snapshot_file(&data_dir, &snap);
     Ok(snap.clone())
 }
@@ -495,8 +568,20 @@ async fn refresh_inner(state: &AppState) -> Result<Snapshot> {
     let year = now.year();
     let month = now.month();
 
+    if !crate::util::online() {
+        return Ok(apply_offline(state));
+    }
+
     let epoch = state.epoch.load(Ordering::SeqCst);
-    let c = live_client(state).await?;
+    let c = match live_client(state).await {
+        Ok(c) => c,
+        Err(_) => {
+            if session_is_open(&data_dir) {
+                return Ok(apply_offline(state));
+            }
+            return Err("未登录".into());
+        }
+    };
     let username = c.username();
 
     let session = if c.has_tgt() {
@@ -504,13 +589,23 @@ async fn refresh_inner(state: &AppState) -> Result<Snapshot> {
     } else {
         match tokio::time::timeout(Duration::from_secs(10), c.session_state()).await {
             Ok(s) => s,
-            Err(_) => SessionState::Expired,
+            Err(_) => {
+                if !crate::util::online() {
+                    return Ok(apply_offline(state));
+                }
+                SessionState::Expired
+            }
         }
     };
     if session == SessionState::Expired && !c.has_tgt() {
+        if !crate::util::online() {
+            return Ok(apply_offline(state));
+        }
         let mut snap = state.snapshot.lock().unwrap().clone();
         snap.logged_in = false;
+        snap.offline = false;
         snap.errors.auth = Some("会话已失效，请重新登录".into());
+        attach_local(&data_dir, &mut snap);
         save_snapshot_file(&data_dir, &snap);
         *state.snapshot.lock().unwrap() = snap.clone();
         return Ok(snap);
@@ -560,6 +655,7 @@ async fn refresh_inner(state: &AppState) -> Result<Snapshot> {
     let mut snap = prev;
     snap.fetched_at = now.to_rfc3339();
     snap.logged_in = true;
+    snap.offline = false;
     snap.username = username;
     snap.errors.auth = None;
     snap.network = if campus {
@@ -677,6 +773,7 @@ async fn refresh_inner(state: &AppState) -> Result<Snapshot> {
     if let Some(s) = sem {
         apply_semester(&mut snap, s, week1_opt(&settings.week1_monday));
     }
+    attach_local(&data_dir, &mut snap);
 
     save_snapshot_file(&data_dir, &snap);
     *state.snapshot.lock().unwrap() = snap.clone();
@@ -685,21 +782,26 @@ async fn refresh_inner(state: &AppState) -> Result<Snapshot> {
 
 #[tauri::command]
 async fn sync_courses(state: State<'_, AppState>) -> Result<Snapshot> {
+    if !crate::util::online() {
+        return Err("当前离线，连上网络后再同步".into());
+    }
     let settings = state.settings.lock().unwrap().clone();
     let data_dir = state.data_dir.clone();
     let sem = {
         let c = live_client(&state).await?;
-        with_timeout(15, c.fetch_semester()).await?
+        with_timeout(90, c.fetch_semester()).await?
     };
     let _ = save_semester(&data_dir, &sem);
     let mut snap = state.snapshot.lock().unwrap().clone();
     snap.errors.course = None;
+    snap.offline = false;
     snap.network = if crate::util::on_campus_net() {
         "campus".into()
     } else {
         "offcampus".into()
     };
     apply_semester(&mut snap, sem, week1_opt(&settings.week1_monday));
+    attach_local(&data_dir, &mut snap);
     save_snapshot_file(&data_dir, &snap);
     *state.snapshot.lock().unwrap() = snap.clone();
     Ok(snap)
@@ -723,7 +825,7 @@ fn persist_island(state: State<AppState>, win: WebviewWindow) -> Result<()> {
 #[tauri::command]
 fn set_expanded(expanded: bool, height: Option<f64>, win: WebviewWindow) -> Result<()> {
     let h = if expanded {
-        height.unwrap_or(560.0).clamp(40.0, 560.0)
+        height.unwrap_or(720.0).clamp(40.0, 720.0)
     } else {
         40.0
     };
@@ -775,6 +877,22 @@ fn set_hover_watch(watch: HoverWatch) {
 }
 
 #[tauri::command]
+fn save_agenda(state: State<AppState>, item: AgendaItem) -> Result<Snapshot> {
+    let items = agenda::upsert(&state.data_dir, item)?;
+    let mut snap = state.snapshot.lock().unwrap();
+    snap.agenda = items;
+    Ok(snap.clone())
+}
+
+#[tauri::command]
+fn delete_agenda(state: State<AppState>, id: String) -> Result<Snapshot> {
+    let items = agenda::delete(&state.data_dir, &id)?;
+    let mut snap = state.snapshot.lock().unwrap();
+    snap.agenda = items;
+    Ok(snap.clone())
+}
+
+#[tauri::command]
 async fn logout(state: State<'_, AppState>) -> Result<()> {
     state.epoch.fetch_add(1, Ordering::SeqCst);
     let remember = state.settings.lock().unwrap().remember_password;
@@ -799,11 +917,19 @@ async fn logout(state: State<'_, AppState>) -> Result<()> {
 fn emit_logged_out_keep_cache(app: &AppHandle, state: &AppState, reason: &str) {
     let mut snap = state.snapshot.lock().unwrap().clone();
     snap.logged_in = false;
+    snap.offline = false;
     if snap.errors.auth.is_none() {
         snap.errors.auth = Some(reason.into());
     }
+    attach_local(&state.data_dir, &mut snap);
     save_snapshot_file(&state.data_dir, &snap);
     *state.snapshot.lock().unwrap() = snap.clone();
+    let _ = app.emit("snapshot-updated", snap);
+    let _ = app.emit("auth-status", "idle");
+}
+
+fn emit_offline(app: &AppHandle, state: &AppState) {
+    let snap = apply_offline(state);
     let _ = app.emit("snapshot-updated", snap);
     let _ = app.emit("auth-status", "idle");
 }
@@ -824,6 +950,13 @@ async fn resume_session(app: AppHandle) {
         }
     };
 
+    if !crate::util::online() {
+        if session_is_open(&state.data_dir) {
+            emit_offline(&app, &state);
+        }
+        return;
+    }
+
     let session = {
         let c = state.client.lock().await.clone();
         match c {
@@ -837,12 +970,25 @@ async fn resume_session(app: AppHandle) {
             let _ = app.emit("auth-status", "syncing");
             match refresh_inner(&state).await {
                 Ok(snap) => {
-                    let logged = snap.logged_in;
+                    let status = if snap.offline {
+                        "idle"
+                    } else if snap.logged_in {
+                        "ok"
+                    } else {
+                        "idle"
+                    };
                     let _ = app.emit("snapshot-updated", snap);
-                    let _ = app.emit("auth-status", if logged { "ok" } else { "idle" });
+                    let _ = app.emit("auth-status", status);
                 }
-                Err(_) => {
-                    emit_logged_out_keep_cache(&app, &state, "会话已失效，请重新登录");
+                Err(e) => {
+                    let es = e.to_string();
+                    if session_is_open(&state.data_dir)
+                        && (!crate::util::online() || crate::util::is_offline_err(&es))
+                    {
+                        emit_offline(&app, &state);
+                    } else {
+                        emit_logged_out_keep_cache(&app, &state, "会话已失效，请重新登录");
+                    }
                 }
             }
             return;
@@ -850,6 +996,9 @@ async fn resume_session(app: AppHandle) {
         Some(SessionState::NeedSms) => {
             if settings.auto_login && settings.remember_password {
                 // fall through to password login, which may resume 2FA
+            } else if session_is_open(&state.data_dir) && !crate::util::online() {
+                emit_offline(&app, &state);
+                return;
             } else {
                 emit_logged_out_keep_cache(&app, &state, "换了网络，这台电脑需要再验证一次");
                 return;
@@ -857,18 +1006,30 @@ async fn resume_session(app: AppHandle) {
         }
         Some(SessionState::Expired) | None => {
             if !(settings.auto_login && settings.remember_password) {
-                emit_logged_out_keep_cache(&app, &state, "会话已失效，请重新登录");
+                if session_is_open(&state.data_dir) && !crate::util::online() {
+                    emit_offline(&app, &state);
+                } else {
+                    emit_logged_out_keep_cache(&app, &state, "会话已失效，请重新登录");
+                }
                 return;
             }
         }
     }
 
     let Some(user) = username else {
-        emit_logged_out_keep_cache(&app, &state, "未登录");
+        if session_is_open(&state.data_dir) && !crate::util::online() {
+            emit_offline(&app, &state);
+        } else {
+            emit_logged_out_keep_cache(&app, &state, "未登录");
+        }
         return;
     };
     let Some(pass) = keyring_get(&user) else {
-        emit_logged_out_keep_cache(&app, &state, "未登录");
+        if session_is_open(&state.data_dir) && !crate::util::online() {
+            emit_offline(&app, &state);
+        } else {
+            emit_logged_out_keep_cache(&app, &state, "未登录");
+        }
         return;
     };
     let _ = app.emit("auth-status", "logging");
@@ -882,7 +1043,14 @@ async fn resume_session(app: AppHandle) {
     let out = match client.login_ex(&user, &pass, false).await {
         Ok(o) => o,
         Err(e) => {
-            let _ = app.emit("auth-status", format!("fail:{e}"));
+            let es = e.to_string();
+            if session_is_open(&state.data_dir)
+                && (!crate::util::online() || crate::util::is_offline_err(&es))
+            {
+                emit_offline(&app, &state);
+            } else {
+                let _ = app.emit("auth-status", format!("fail:{e}"));
+            }
             return;
         }
     };
@@ -934,9 +1102,12 @@ pub fn run() {
                 if let Some(u) = snapshot.username.clone() {
                     c.set_username(u);
                 }
-                if !c.has_tgt() {
-                    snapshot.logged_in = false;
-                }
+            }
+            migrate_session_flag(&data_dir, &snapshot);
+            snapshot.agenda = agenda::load(&data_dir);
+            if session_is_open(&data_dir) {
+                snapshot.logged_in = true;
+                snapshot.errors.auth = None;
             } else {
                 snapshot.logged_in = false;
             }
@@ -1070,6 +1241,8 @@ pub fn run() {
             raise_topmost,
             set_hover_watch,
             set_bills_open,
+            save_agenda,
+            delete_agenda,
             logout
         ])
         .run(tauri::generate_context!())

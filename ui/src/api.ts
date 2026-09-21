@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { AppSettings, LoginOutcome, SavedCreds, Snapshot } from "./types";
+import type { Agenda, AppSettings, LoginOutcome, SavedCreds, Snapshot } from "./types";
+
+export const PANEL_MAX = 720;
 
 export const api = {
   bootstrap: () => invoke<Snapshot>("bootstrap"),
@@ -20,6 +22,8 @@ export const api = {
   refresh: () => invoke<Snapshot>("refresh"),
   loadMonth: (year: number, month: number) => invoke<Snapshot>("load_month", { year, month }),
   syncCourses: () => invoke<Snapshot>("sync_courses"),
+  saveAgenda: (item: Agenda) => invoke<Snapshot>("save_agenda", { item }),
+  deleteAgenda: (id: string) => invoke<Snapshot>("delete_agenda", { id }),
   logout: () => invoke<void>("logout"),
   resetIsland: () => invoke<void>("reset_island"),
   raiseTopmost: () => invoke<void>("raise_topmost"),
@@ -30,7 +34,7 @@ export const api = {
 
 export async function setExpanded(expanded: boolean, height?: number) {
   const w = getCurrentWindow();
-  const h = expanded ? Math.min(560, Math.max(40, Math.ceil(height ?? 560))) : 40;
+  const h = expanded ? Math.min(PANEL_MAX, Math.max(40, Math.ceil(height ?? PANEL_MAX))) : 40;
   await w.setSize(new LogicalSize(420, h));
   try {
     await invoke("set_expanded", { expanded, height: h });

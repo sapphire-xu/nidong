@@ -28,7 +28,29 @@ pub struct Snapshot {
     pub semester: Option<SemesterTable>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub teaching_week: Option<u32>,
+    /// 运行时探测：没网。不要当磁盘真源，写入 snapshot.json 前会清掉。
+    #[serde(default)]
+    pub offline: bool,
+    /// 本机自定义日程。真源是 agenda.json，snapshot 里只是带给 UI。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agenda: Vec<AgendaItem>,
     pub errors: SnapshotErrors,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgendaItem {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// 本地 `YYYY-MM-DDTHH:MM`
+    pub start: String,
+    pub end: String,
+    #[serde(default)]
+    pub remind: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remind_minutes: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +72,14 @@ pub struct Course {
     pub campus: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TermWeek {
+    pub n: u32,
+    pub start: String,
+    pub end: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SemesterTable {
@@ -58,6 +88,9 @@ pub struct SemesterTable {
     pub week1_monday: String,
     pub fetched_at: String,
     pub courses: Vec<Course>,
+    /// 教务 `getTermWeeks` 的官方教学周（含起止日）。旧缓存没有此字段。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub term_weeks: Vec<TermWeek>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

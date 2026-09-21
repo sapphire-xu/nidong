@@ -43,7 +43,20 @@ export type Snapshot = {
   coursesToday?: Course[];
   semester?: SemesterTable;
   teachingWeek?: number;
+  offline?: boolean;
+  agenda?: Agenda[];
   errors: Partial<Record<"card" | "net" | "elec" | "course" | "auth", string>>;
+};
+
+export type Agenda = {
+  id: string;
+  name: string;
+  note?: string;
+  /** 本地 `YYYY-MM-DDTHH:MM` */
+  start: string;
+  end: string;
+  remind: boolean;
+  remindMinutes?: number;
 };
 
 export type Course = {
@@ -58,12 +71,19 @@ export type Course = {
   campus?: "nanhu" | "hunnan" | string;
 };
 
+export type TermWeek = {
+  n: number;
+  start: string;
+  end: string;
+};
+
 export type SemesterTable = {
   semesterId: string;
   label: string;
   week1Monday: string;
   fetchedAt: string;
   courses: Course[];
+  termWeeks?: TermWeek[];
 };
 
 type boolish = boolean;

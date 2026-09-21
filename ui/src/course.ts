@@ -123,6 +123,20 @@ export function teachingWeek(week1Monday: string | undefined, now: Date): number
   return Math.floor(diff / 7) + 1;
 }
 
+export function teachingWeekFromTerm(
+  termWeeks: { n: number; start: string; end: string }[] | undefined,
+  now: Date
+): number | undefined {
+  if (!termWeeks?.length) return undefined;
+  const t = ymd(now);
+  for (const w of termWeeks) {
+    const s = (w.start || "").slice(0, 10);
+    const e = (w.end || "").slice(0, 10);
+    if (s && e && t >= s && t <= e) return w.n;
+  }
+  return undefined;
+}
+
 export function weekdayOf(now: Date): number {
   const d = now.getDay();
   return d === 0 ? 7 : d;
@@ -161,6 +175,16 @@ function hm(s: string, now: Date): Date {
 
 export function minutesUntil(hhmm: string, now: Date): number {
   return Math.max(0, Math.round((hm(hhmm, now).getTime() - now.getTime()) / 60000));
+}
+
+export function addDays(d: Date, n: number): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+}
+
+/** 今天本来有课，并且最后一节已经下课。没课的日子不算「上完」。 */
+export function allCoursesEnded(courses: Course[], now: Date): boolean {
+  if (!courses.length) return false;
+  return courses.every((c) => now >= hm(c.end, now));
 }
 
 /** 尚未开始、且距离开课不超过 withinMinutes 的最近一节。 */
