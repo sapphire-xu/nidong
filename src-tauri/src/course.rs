@@ -396,6 +396,29 @@ pub fn semester_cache_stale(sem: &SemesterTable) -> bool {
     false
 }
 
+/// `fetched_at` 是本机 RFC3339，取其中的日历日，不换时区。
+pub fn fetched_local_date(fetched_at: &str) -> Option<NaiveDate> {
+    parse_ymd(fetched_at)
+}
+
+/// 没缓存或学期过期：每次刷新都试。有缓存时，自动任务每天最多打一次教务；
+/// 手动刷新在今天还没同步成功时可以再试一次。
+pub fn should_fetch_courses(
+    has_cache: bool,
+    semester_stale: bool,
+    fetched_today: bool,
+    attempted_today: bool,
+    manual: bool,
+) -> bool {
+    if !has_cache || semester_stale {
+        return true;
+    }
+    if fetched_today {
+        return false;
+    }
+    manual || !attempted_today
+}
+
 pub fn guess_term(today: NaiveDate) -> String {
     let y = today.year();
     let m = today.month();
@@ -1734,6 +1757,20 @@ pub fn looks_like_login_page(text: &str) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn course_fetch_is_once_a_day_unless_manual_or_empty() {
+        assert!(should_fetch_courses(false, false, false, true, false));
+        assert!(should_fetch_courses(true, true, true, true, false));
+        assert!(!should_fetch_courses(true, false, true, false, true));
+        assert!(should_fetch_courses(true, false, false, false, false));
+        assert!(!should_fetch_courses(true, false, false, true, false));
+        assert!(should_fetch_courses(true, false, false, true, true));
+        assert_eq!(
+            fetched_local_date("2026-09-29T23:10:00+08:00"),
+            NaiveDate::from_ymd_opt(2026, 9, 29)
+        );
+    }
 
     #[test]
     fn weeks_ranges_odd_bits() {

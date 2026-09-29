@@ -1131,6 +1131,7 @@ impl NeuClient {
                 room_no: None,
                 room_label: None,
                 last_read_at: None,
+                stale: false,
             });
         }
         if let Err(e) = self.cas_service(SERVICE_PAY).await {
@@ -1192,6 +1193,7 @@ impl NeuClient {
                 .get("lastReadTime")
                 .and_then(|x| x.as_str())
                 .map(|s| s.to_string()),
+            stale: false,
         })
     }
 

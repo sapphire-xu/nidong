@@ -39,6 +39,8 @@ export type Snapshot = {
     roomNo?: string;
     roomLabel?: string;
     lastReadAt?: string;
+    /** 23:00–06:00 没连上电费系统，度数是上次成功的读数。 */
+    stale?: boolean;
   };
   coursesToday?: Course[];
   semester?: SemesterTable;

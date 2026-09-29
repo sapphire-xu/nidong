@@ -1,4 +1,18 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+  Field,
+  Input,
+  SpinButton,
+  Switch,
+  Textarea,
+} from "@fluentui/react-components";
 import type { Agenda } from "./types";
 
 function pad(n: number) {
@@ -68,78 +82,43 @@ function defaultStamp(now: Date) {
   return { start: stampOf(start), end: stampOf(end) };
 }
 
-function DateTimeRow(props: {
-  label: string;
-  value: Parts;
-  onChange: (v: Parts) => void;
-}) {
+function DateTimeRow(props: { label: string; value: Parts; onChange: (v: Parts) => void }) {
   const p = props.value;
   function set(patch: Partial<Parts>) {
     props.onChange({ ...p, ...patch });
   }
-
+  function cell(part: keyof Parts, label: string, max: number, wide = false) {
+    return (
+      <Input
+        className={wide ? "y" : undefined}
+        aria-label={`${props.label}${label}`}
+        placeholder={label}
+        inputMode="numeric"
+        maxLength={max}
+        value={p[part]}
+        onChange={(_, data) => set({ [part]: data.value.replace(/\D/g, "").slice(0, max) })}
+      />
+    );
+  }
   return (
-    <>
-      <label>{props.label}</label>
+    <Field label={props.label}>
       <div className="dt-row">
-        <input
-          type="text"
-          inputMode="numeric"
-          maxLength={4}
-          aria-label={`${props.label}年`}
-          placeholder="年"
-          value={p.y}
-          onChange={(e) => set({ y: e.target.value.replace(/\D/g, "").slice(0, 4) })}
-        />
+        {cell("y", "年", 4, true)}
         <span>年</span>
-        <input
-          type="text"
-          inputMode="numeric"
-          maxLength={2}
-          aria-label={`${props.label}月`}
-          placeholder="月"
-          value={p.m}
-          onChange={(e) => set({ m: e.target.value.replace(/\D/g, "").slice(0, 2) })}
-        />
+        {cell("m", "月", 2)}
         <span>月</span>
-        <input
-          type="text"
-          inputMode="numeric"
-          maxLength={2}
-          aria-label={`${props.label}日`}
-          placeholder="日"
-          value={p.d}
-          onChange={(e) => set({ d: e.target.value.replace(/\D/g, "").slice(0, 2) })}
-        />
+        {cell("d", "日", 2)}
         <span>日</span>
-        <input
-          className="dt-hm"
-          type="text"
-          inputMode="numeric"
-          maxLength={2}
-          aria-label={`${props.label}时`}
-          placeholder="时"
-          value={p.hh}
-          onChange={(e) => set({ hh: e.target.value.replace(/\D/g, "").slice(0, 2) })}
-        />
+        {cell("hh", "时", 2)}
         <span>:</span>
-        <input
-          className="dt-hm"
-          type="text"
-          inputMode="numeric"
-          maxLength={2}
-          aria-label={`${props.label}分`}
-          placeholder="分"
-          value={p.mm}
-          onChange={(e) => set({ mm: e.target.value.replace(/\D/g, "").slice(0, 2) })}
-        />
+        {cell("mm", "分", 2)}
       </div>
-    </>
+    </Field>
   );
 }
 
 export function EventForm(props: {
-  pin: ReactNode;
+  open: boolean;
   initial: Agenda | null;
   now: Date;
   busy?: boolean;
@@ -163,7 +142,7 @@ export function EventForm(props: {
   const [start, setStart] = useState(() => splitStamp(init.start));
   const [end, setEnd] = useState(() => splitStamp(init.end));
   const [remind, setRemind] = useState(!!init.remind);
-  const [remindText, setRemindText] = useState(String(init.remindMinutes ?? 15));
+  const [remindMinutes, setRemindMinutes] = useState(init.remindMinutes ?? 15);
   const [localErr, setLocalErr] = useState("");
 
   function save() {
@@ -186,14 +165,9 @@ export function EventForm(props: {
       setLocalErr("结束时间必须晚于开始时间");
       return;
     }
-    let remindMinutes: number | undefined;
-    if (remind) {
-      const m = Math.floor(Number(remindText));
-      if (!Number.isFinite(m) || m < 1 || m > 180) {
-        setLocalErr("提醒时间须在 1–180 分钟");
-        return;
-      }
-      remindMinutes = m;
+    if (remind && (!Number.isFinite(remindMinutes) || remindMinutes < 1 || remindMinutes > 180)) {
+      setLocalErr("提醒时间须在 1–180 分钟");
+      return;
     }
     setLocalErr("");
     props.onSave({
@@ -203,62 +177,51 @@ export function EventForm(props: {
       start: startStamp,
       end: endStamp,
       remind,
-      remindMinutes,
+      remindMinutes: remind ? remindMinutes : undefined,
     });
   }
 
   return (
-    <div className="panel event-form">
-      <div className="bill-head drag">
-        <button className="back" type="button" onClick={props.onClose}>
-          ‹ {editing ? "编辑日程" : "添加日程"}
-        </button>
-        <div className="week" />
-        {props.pin}
-      </div>
-      <label>名称</label>
-      <input
-        type="text"
-        maxLength={40}
-        placeholder="例如 班会、实验"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-      />
-      <DateTimeRow label="开始" value={start} onChange={setStart} />
-      <DateTimeRow label="结束" value={end} onChange={setEnd} />
-      <div className="toggle" onClick={() => setRemind((v) => !v)}>
-        <span>提醒</span>
-        <div className={`sw ${remind ? "on" : ""}`}><i /></div>
-      </div>
-      {remind ? (
-        <>
-          <label>提前多少分钟</label>
-          <input
-            type="text"
-            inputMode="numeric"
-            value={remindText}
-            onChange={(e) => setRemindText(e.target.value.replace(/\D/g, "").slice(0, 3))}
-          />
-          <p className="hint">到点弹出折叠岛，约 10 秒。保存时检查须为 1–180 的整数。</p>
-        </>
-      ) : null}
-      <label>备注</label>
-      <textarea
-        rows={3}
-        maxLength={200}
-        placeholder="选填"
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-      />
-      <button className="primary" type="button" disabled={props.busy} onClick={save}>
-        {props.busy ? "保存中…" : "保存"}
-      </button>
-      {editing && props.onDelete ? (
-        <button className="ghost danger" type="button" disabled={props.busy} onClick={() => props.onDelete!(init.id)}>
-          删除
-        </button>
-      ) : null}
-      {localErr || props.err ? <div className="err-inline">{localErr || props.err}</div> : null}
-    </div>
+    <Dialog open={props.open} onOpenChange={(_, data) => { if (!data.open) props.onClose(); }}>
+      <DialogSurface>
+        <DialogBody>
+          <DialogTitle>{editing ? "编辑日程" : "添加日程"}</DialogTitle>
+          <DialogContent className="stack">
+            <Field label="名称">
+              <Input maxLength={40} placeholder="例如 班会、实验" value={name} onChange={(_, d) => setName(d.value)} />
+            </Field>
+            <DateTimeRow label="开始" value={start} onChange={setStart} />
+            <DateTimeRow label="结束" value={end} onChange={setEnd} />
+            <Switch label="提醒" checked={remind} onChange={(_, d) => setRemind(d.checked)} />
+            {remind ? (
+              <Field label="提前多少分钟">
+                <SpinButton
+                  min={1}
+                  max={180}
+                  step={1}
+                  value={remindMinutes}
+                  onChange={(_, data) => {
+                    const n = data.value ?? Math.floor(Number(data.displayValue));
+                    if (Number.isFinite(n)) setRemindMinutes(n);
+                  }}
+                />
+              </Field>
+            ) : null}
+            {remind ? <p className="hint">到点弹出岛，约 10 秒。须为 1–180 的整数。</p> : null}
+            <Field label="备注">
+              <Textarea rows={3} maxLength={200} placeholder="选填" value={note} onChange={(_, d) => setNote(d.value)} />
+            </Field>
+            {localErr || props.err ? <div className="hint warn">{localErr || props.err}</div> : null}
+          </DialogContent>
+          <DialogActions>
+            {editing && props.onDelete ? (
+              <Button appearance="secondary" disabled={props.busy} onClick={() => props.onDelete!(init.id)}>删除</Button>
+            ) : null}
+            <Button appearance="secondary" onClick={props.onClose}>取消</Button>
+            <Button appearance="primary" disabled={props.busy} onClick={save}>{props.busy ? "保存中…" : "保存"}</Button>
+          </DialogActions>
+        </DialogBody>
+      </DialogSurface>
+    </Dialog>
   );
 }

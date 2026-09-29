@@ -1,69 +1,35 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Button,
+  Divider,
+  Field,
+  Input,
+  Radio,
+  RadioGroup,
+  Slider,
+  SpinButton,
+  Switch,
+} from "@fluentui/react-components";
+import {
+  Alert20Regular,
+  CalendarLtr20Regular,
+  Checkmark20Regular,
+  Color20Regular,
+  Home20Regular,
+  Person20Regular,
+  Window20Regular,
+} from "@fluentui/react-icons";
 import type { AppSettings, SemesterTable } from "./types";
 
 type Page = "hub" | "appearance" | "dorm" | "schedule" | "account" | "panel" | "remind";
 
-const PAGES: { id: Page; title: string; desc: string; icon: ReactNode }[] = [
-  {
-    id: "appearance",
-    title: "外观",
-    desc: "浅色、深色，或跟随系统",
-    icon: (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path fill="currentColor" d="M8 1.5A6.5 6.5 0 1 0 8 14.5 6.5 6.5 0 0 0 8 1.5zm0 1v11A5.5 5.5 0 0 0 8 2.5z" />
-      </svg>
-    ),
-  },
-  {
-    id: "dorm",
-    title: "宿舍与余额",
-    desc: "电费房间码、低余额阈值",
-    icon: (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path fill="currentColor" d="M2.5 13.5V7.2L8 3.1l5.5 4.1v6.3H9.5v-3.2h-3v3.2H2.5z" />
-      </svg>
-    ),
-  },
-  {
-    id: "schedule",
-    title: "课表",
-    desc: "第一周周一、同步课表",
-    icon: (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path fill="currentColor" d="M4 2.5h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2zm0 3.5v7.5h8V6H4zm1.5-3h1v2h-1v-2zm4 0h1v2h-1v-2z" />
-      </svg>
-    ),
-  },
-  {
-    id: "account",
-    title: "启动与登录",
-    desc: "记住密码、自动登录、开机自启",
-    icon: (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path fill="currentColor" d="M8 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6zm0 7c2.8 0 5.5 1.4 5.5 3.2V14h-11v-1.8C2.5 10.4 5.2 9 8 9z" />
-      </svg>
-    ),
-  },
-  {
-    id: "panel",
-    title: "面板行为",
-    desc: "自动隐藏、快捷键、悬停展开",
-    icon: (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path fill="currentColor" d="M2 3.5h12v2.2H2V3.5zm0 3.6h12v5.4H2V7.1z" />
-      </svg>
-    ),
-  },
-  {
-    id: "remind",
-    title: "上课提醒",
-    desc: "上课前弹出置顶提醒",
-    icon: (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path fill="currentColor" d="M8 1.8a5 5 0 0 1 5 5v2.4l1.2 1.8H1.8L3 9.2V6.8a5 5 0 0 1 5-5zm-1.6 11h3.2a1.6 1.6 0 0 1-3.2 0z" />
-      </svg>
-    ),
-  },
+const PAGES: { id: Page; title: string; desc: string; icon: JSX.Element }[] = [
+  { id: "appearance", title: "外观", desc: "浅色、深色，或跟随系统", icon: <Color20Regular /> },
+  { id: "dorm", title: "宿舍与余额", desc: "电费房间码、低余额阈值", icon: <Home20Regular /> },
+  { id: "schedule", title: "课表", desc: "第一周周一、同步课表", icon: <CalendarLtr20Regular /> },
+  { id: "account", title: "启动与登录", desc: "记住密码、自动登录、开机自启", icon: <Person20Regular /> },
+  { id: "panel", title: "面板行为", desc: "自动隐藏、快捷键、悬停唤出", icon: <Window20Regular /> },
+  { id: "remind", title: "上课提醒", desc: "上课前弹出置顶提醒", icon: <Alert20Regular /> },
 ];
 
 function pad(n: number) {
@@ -101,8 +67,7 @@ function YmdField({ value, onChange }: { value: string; onChange: (v: string) =>
   function apply(next: { y: string; m: string; d: string }) {
     const out = formatYmd(next);
     if (out === null) {
-      const back = parseYmd(valueRef.current);
-      setDraft(back);
+      setDraft(parseYmd(valueRef.current));
       return;
     }
     setDraft(out ? parseYmd(out) : { y: "", m: "", d: "" });
@@ -123,103 +88,28 @@ function YmdField({ value, onChange }: { value: string; onChange: (v: string) =>
     apply(cur);
   }, []);
 
+  function cell(part: "y" | "m" | "d", label: string, max: number) {
+    return (
+      <Input
+        aria-label={label}
+        placeholder={label}
+        inputMode="numeric"
+        maxLength={max}
+        value={draft[part]}
+        onChange={(_, data) => setDraft({ ...draft, [part]: data.value.replace(/\D/g, "").slice(0, max) })}
+      />
+    );
+  }
+
   return (
     <div className="ymd">
-      <input
-        type="text"
-        inputMode="numeric"
-        maxLength={4}
-        aria-label="年"
-        placeholder="年"
-        value={draft.y}
-        onChange={(e) => setDraft({ ...draft, y: e.target.value.replace(/\D/g, "").slice(0, 4) })}
-      />
+      {cell("y", "年", 4)}
       <span>年</span>
-      <input
-        type="text"
-        inputMode="numeric"
-        maxLength={2}
-        aria-label="月"
-        placeholder="月"
-        value={draft.m}
-        onChange={(e) => setDraft({ ...draft, m: e.target.value.replace(/\D/g, "").slice(0, 2) })}
-      />
+      {cell("m", "月", 2)}
       <span>月</span>
-      <input
-        type="text"
-        inputMode="numeric"
-        maxLength={2}
-        aria-label="日"
-        placeholder="日"
-        value={draft.d}
-        onChange={(e) => setDraft({ ...draft, d: e.target.value.replace(/\D/g, "").slice(0, 2) })}
-      />
+      {cell("d", "日", 2)}
       <span>日</span>
     </div>
-  );
-}
-
-function DebouncedNumber(props: {
-  value: number;
-  fallback: number;
-  min?: number;
-  max?: number;
-  integer?: boolean;
-  onCommit: (n: number) => void;
-}) {
-  const { value, fallback, min, max, integer, onCommit } = props;
-  const [text, setText] = useState(String(value));
-  const textRef = useRef(text);
-  const valueRef = useRef(value);
-  const onCommitRef = useRef(onCommit);
-  textRef.current = text;
-  valueRef.current = value;
-  onCommitRef.current = onCommit;
-  useEffect(() => {
-    setText(String(value));
-  }, [value]);
-
-  function parse(raw: string): number | null {
-    const n = integer ? Math.floor(Number(raw)) : Number(raw);
-    if (!Number.isFinite(n)) return null;
-    if (raw.trim() === "") return null;
-    if (min != null && n < min) return null;
-    if (max != null && n > max) return null;
-    return n;
-  }
-
-  function apply(raw: string) {
-    const n = parse(raw);
-    if (n == null) {
-      setText(String(fallback));
-      if (valueRef.current !== fallback) onCommitRef.current(fallback);
-      return;
-    }
-    setText(String(n));
-    if (n !== valueRef.current) onCommitRef.current(n);
-  }
-
-  useEffect(() => {
-    if (text === String(value)) return;
-    const t = window.setTimeout(() => apply(text), 3000);
-    return () => window.clearTimeout(t);
-  }, [text, value]);
-
-  useEffect(() => () => {
-    const raw = textRef.current;
-    if (raw === String(valueRef.current)) return;
-    apply(raw);
-  }, []);
-
-  return (
-    <input
-      type="number"
-      min={min}
-      max={max}
-      step={integer ? 1 : undefined}
-      value={text}
-      onChange={(e) => setText(e.target.value)}
-    />
   );
 }
 
@@ -270,18 +160,63 @@ function HotkeyField({ value, onChange }: { value: string; onChange: (v: string)
   }, [capturing, onChange]);
 
   return (
-    <button
-      type="button"
-      className={`hotkey-btn ${capturing ? "capturing" : ""}`}
-      onClick={() => setCapturing((v) => !v)}
-    >
+    <Button appearance={capturing ? "primary" : "secondary"} onClick={() => setCapturing((v) => !v)}>
       {capturing ? "按下组合键…" : (value || "Ctrl+Q").replace(/\+/g, " + ")}
-    </button>
+    </Button>
+  );
+}
+
+function Threshold({
+  label,
+  value,
+  max,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  onCommit: (n: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+
+  function commit(raw: string) {
+    const n = Math.min(max, Math.max(0, Math.round(Number(raw))));
+    if (Number.isFinite(n)) {
+      setDraft(String(n));
+      onCommit(n);
+    } else {
+      setDraft(String(value));
+    }
+  }
+
+  return (
+    <div className="threshold">
+      <Field label={`${label}：${value}`}>
+        <div className="threshold-control">
+          <Slider min={0} max={max} step={1} value={Math.min(value, max)} onChange={(_, data) => {
+            setDraft(String(data.value));
+            onCommit(data.value);
+          }} />
+          <Input
+            className="threshold-input"
+            type="number"
+            min={0}
+            max={max}
+            step={1}
+            value={draft}
+            aria-label={label}
+            onChange={(_, data) => setDraft(data.value)}
+            onBlur={() => commit(draft)}
+            onKeyDown={(e) => { if (e.key === "Enter") commit(draft); }}
+          />
+        </div>
+      </Field>
+    </div>
   );
 }
 
 export function SettingsPanel(props: {
-  pin: ReactNode;
   settings: AppSettings;
   setSettings: (s: AppSettings) => void;
   semester?: SemesterTable;
@@ -289,118 +224,100 @@ export function SettingsPanel(props: {
   courseSync: "idle" | "spin" | "ok" | "fail";
   courseSyncErr?: string;
   offline?: boolean;
-  onClose: () => void;
   onSync: () => void;
   onLogout: () => void;
   onPreviewRemind: () => void;
 }) {
-  const { pin, settings, setSettings, semester, cacheLabel, courseSync, courseSyncErr, offline, onClose, onSync, onLogout, onPreviewRemind } = props;
+  const { settings, setSettings, semester, cacheLabel, courseSync, courseSyncErr, offline, onSync, onLogout, onPreviewRemind } = props;
   const [page, setPage] = useState<Page>("hub");
   const title = page === "hub" ? "设置" : PAGES.find((p) => p.id === page)?.title || "设置";
-  const back = () => {
-    if (page === "hub") onClose();
-    else setPage("hub");
-  };
   const s = settings;
   const set = (patch: Partial<AppSettings>) => setSettings({ ...s, ...patch });
 
   return (
-    <div className="panel settings-panel">
-      <div className="bill-head drag">
-        <button className="back" type="button" onClick={back}>‹ {title}</button>
-        <div className="week" />
-        {pin}
+    <div className={`stack settings-panel ${page === "hub" ? "settings-hub-page" : "settings-sub-page"}`}>
+      <div className="row-between">
+        {page === "hub" ? (
+          <h1 className="page-title">设置</h1>
+        ) : (
+          <div className="settings-breadcrumb">
+            <button type="button" className="settings-breadcrumb-link" onClick={() => setPage("hub")}>设置</button>
+            <span aria-hidden="true">›</span>
+            <h1 className="page-title">{title}</h1>
+          </div>
+        )}
+        {page !== "hub" ? (
+          <span />
+        ) : null}
       </div>
 
       {page === "hub" && (
-        <div className="set-hub">
+        <div className="set-list">
           {PAGES.map((p) => (
-            <button key={p.id} type="button" className="set-card" onClick={() => setPage(p.id)}>
-              <span className="set-ico">{p.icon}</span>
-              <span className="set-txt">
-                <strong>{p.title}</strong>
-                <small>{p.desc}</small>
-              </span>
-              <span className="set-chev">›</span>
+            <button key={p.id} type="button" className="set-item" onClick={() => setPage(p.id)}>
+              <span className="set-icon" aria-hidden="true">{p.icon}</span>
+              <strong>{p.title}</strong>
+              <span className="chev" aria-hidden="true">›</span>
+              <small>{p.desc}</small>
             </button>
           ))}
-          <button type="button" className="set-logout" onClick={onLogout}>
-            退出登录
-          </button>
+          <Divider />
+          <Button className="logout" appearance="secondary" onClick={onLogout}>退出登录</Button>
         </div>
       )}
 
       {page === "appearance" && (
-        <div className="set-body">
-          <p className="set-lead">看板颜色。宿舍关灯用深色，教室投影用浅色。</p>
-          <div className="theme-row">
-            {(["system", "light", "dark"] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                className={`chip ${s.theme === t ? "on" : ""}`}
-                onClick={() => set({ theme: t })}
-              >
-                {t === "system" ? "跟随系统" : t === "light" ? "浅色" : "深色"}
-              </button>
-            ))}
-          </div>
+        <div key={page} className="stack settings-sub-content">
+          <p className="hint">看板颜色。宿舍关灯用深色，教室投影用浅色。</p>
+          <RadioGroup value={s.theme === "light" || s.theme === "dark" ? s.theme : "system"} onChange={(_, d) => set({ theme: d.value })}>
+            <Radio value="system" label="跟随系统" />
+            <Radio value="light" label="浅色" />
+            <Radio value="dark" label="深色" />
+          </RadioGroup>
         </div>
       )}
 
       {page === "dorm" && (
-        <div className="set-body">
-          <h3>电费房间码</h3>
-          <input
-            type="text"
-            autoComplete="off"
-            spellCheck={false}
-            value={s.roomNo}
-            onChange={(e) => set({ roomNo: e.target.value })}
-            placeholder="宿舍3位+寝室4位，可留空"
-          />
-          <p className="hint">改过房间码的话，返回看板会重新拉电费。</p>
-          <h3>低余额阈值</h3>
-          <label>卡低于（元）</label>
-          <DebouncedNumber value={s.cardWarn} fallback={100} min={0} onCommit={(cardWarn) => set({ cardWarn })} />
-          <label>网低于（元）</label>
-          <DebouncedNumber value={s.netWarn} fallback={10} min={0} onCommit={(netWarn) => set({ netWarn })} />
-          <label>电低于（度）</label>
-          <DebouncedNumber value={s.elecWarn} fallback={20} min={0} onCommit={(elecWarn) => set({ elecWarn })} />
+        <div key={page} className="stack settings-sub-content">
+          <Field label="电费房间码">
+            <Input
+              autoComplete="off"
+              spellCheck={false}
+              value={s.roomNo}
+              placeholder="宿舍3位+寝室4位，可留空"
+              onChange={(_, d) => set({ roomNo: d.value })}
+            />
+          </Field>
+          <p className="hint">改过房间码的话，离开设置会重新拉电费。</p>
+          <Threshold label="卡低于（元）" value={s.cardWarn} max={500} onCommit={(cardWarn) => set({ cardWarn })} />
+          <Threshold label="网低于（元）" value={s.netWarn} max={200} onCommit={(netWarn) => set({ netWarn })} />
+          <Threshold label="电低于（度）" value={s.elecWarn} max={300} onCommit={(elecWarn) => set({ elecWarn })} />
         </div>
       )}
 
       {page === "schedule" && (
-        <div className="set-body">
-          <h3>本学期第一周周一</h3>
-          <YmdField value={s.week1Monday || ""} onChange={(week1Monday) => set({ week1Monday })} />
+        <div key={page} className="stack settings-sub-content">
+          <Field label="本学期第一周周一">
+            <YmdField value={s.week1Monday || ""} onChange={(week1Monday) => set({ week1Monday })} />
+          </Field>
           <p className="hint">
             不填则用教务校历
             {semester?.week1Monday ? `（${semester.week1Monday.replace(/-/g, "·")}）` : ""}
             ，用来算「第几周」。
           </p>
-          <div className={`cache-line ${courseSync === "spin" ? "syncing" : ""} ${courseSync === "ok" ? "synced" : ""}`}>
-            <span>{cacheLabel ? `课表 · ${cacheLabel}已缓存` : "课表 · 尚未同步"}</span>
-            {courseSync === "spin" ? (
-              <span className="sync-status spin">
-                <i className="sync-ico" aria-hidden="true" />
-                同步中
-              </span>
-            ) : courseSync === "ok" ? (
-              <span className="sync-status ok">
-                <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M6.3 11.1 3.2 8l.9-.9 2.2 2.2 5.6-5.6.9.9z"/></svg>
-                已同步
-              </span>
-            ) : (
-              <button
-                className={`link ${courseSync === "fail" ? "fail" : ""}`}
-                type="button"
-                disabled={offline}
-                onClick={onSync}
-              >
-                {offline ? "离线" : courseSync === "fail" ? "重试同步" : "重新同步"}
-              </button>
-            )}
+          <div className={courseSync === "spin" ? "sync-row syncing" : "sync-row"}>
+            <div className="row-between">
+              <span>{cacheLabel ? `课表 · ${cacheLabel}已缓存` : "课表 · 尚未同步"}</span>
+              {courseSync === "spin" ? (
+                <span className="sync-status spin"><i className="status-spin" aria-hidden="true" />同步中</span>
+              ) : courseSync === "ok" ? (
+                <span className="sync-status ok"><Checkmark20Regular />已同步</span>
+              ) : (
+                <Button appearance="subtle" disabled={offline} onClick={onSync}>
+                  {offline ? "离线" : courseSync === "fail" ? "重试同步" : "重新同步"}
+                </Button>
+              )}
+            </div>
           </div>
           {courseSync === "fail" && courseSyncErr ? <p className="hint warn">{courseSyncErr}</p> : null}
           {offline ? <p className="hint">离线时不能打教务，连上网络后再同步。</p> : null}
@@ -408,99 +325,73 @@ export function SettingsPanel(props: {
       )}
 
       {page === "account" && (
-        <div className="set-body">
-          <div
-            className="toggle"
-            onClick={() => {
-              const next = !(s.rememberPassword !== false);
-              set({ rememberPassword: next, autoLogin: next && !!s.autoLogin });
-            }}
-          >
-            <span>记住密码</span>
-            <div className={`sw ${s.rememberPassword !== false ? "on" : ""}`}><i /></div>
-          </div>
-          <div
-            className={`toggle ${s.rememberPassword === false ? "off" : ""}`}
-            onClick={() => {
-              if (s.rememberPassword === false) return;
-              set({ autoLogin: !s.autoLogin });
-            }}
-          >
-            <span>启动时自动登录</span>
-            <div className={`sw ${s.autoLogin !== false && s.rememberPassword !== false ? "on" : ""}`}><i /></div>
-          </div>
-          <div className="toggle" onClick={() => set({ autostart: !s.autostart })}>
-            <span>开机自启</span>
-            <div className={`sw ${s.autostart ? "on" : ""}`}><i /></div>
-          </div>
+        <div key={page} className="stack settings-sub-content">
+          <Switch
+            label="记住密码"
+            checked={s.rememberPassword !== false}
+            onChange={(_, d) => set({ rememberPassword: d.checked, autoLogin: d.checked && !!s.autoLogin })}
+          />
+          <Switch
+            label="启动时自动登录"
+            disabled={s.rememberPassword === false}
+            checked={s.autoLogin !== false && s.rememberPassword !== false}
+            onChange={(_, d) => set({ autoLogin: d.checked })}
+          />
+          <Switch label="开机自启" checked={!!s.autostart} onChange={(_, d) => set({ autostart: d.checked })} />
           <p className="hint">密码只进这台电脑的系统凭据。关掉「记住密码」会从系统凭据里删掉已存的密码。退出登录不会清。</p>
         </div>
       )}
 
       {page === "panel" && (
-        <div className="set-body">
-          <p className="set-lead">折叠后可以再藏进屏幕上沿。上课提醒仍会弹出，不受隐藏影响。独占全屏游戏时会自动藏起；游戏开无边框窗口化，岛才能继续置顶。</p>
-          <div className="toggle" onClick={() => set({ autoHide: !s.autoHide })}>
-            <span>自动隐藏</span>
-            <div className={`sw ${s.autoHide ? "on" : ""}`}><i /></div>
-          </div>
+        <div key={page} className="stack settings-sub-content">
+          <p className="hint">折叠后可以再藏进屏幕上沿。上课提醒仍会弹出，不受隐藏影响。独占全屏游戏时会自动藏起；游戏开无边框窗口化，岛才能继续置顶。</p>
+          <Switch label="自动隐藏" checked={!!s.autoHide} onChange={(_, d) => set({ autoHide: d.checked })} />
           {s.autoHide ? (
             <>
-              <p className="hint">变成折叠岛后再过 3 秒，向上收起。</p>
-              <div className="toggle" onClick={() => set({ autoHideHotkey: !s.autoHideHotkey })}>
-                <span>快捷键唤出</span>
-                <div className={`sw ${s.autoHideHotkey ? "on" : ""}`}><i /></div>
-              </div>
+              <p className="hint">岛露出来后再过 3 秒，向上收起。</p>
+              <Switch label="快捷键唤出" checked={!!s.autoHideHotkey} onChange={(_, d) => set({ autoHideHotkey: d.checked })} />
               {s.autoHideHotkey ? (
                 <>
-                  <div className="hotkey-row">
+                  <div className="row-between">
                     <span>组合键</span>
-                    <HotkeyField
-                      value={s.revealHotkey || "Ctrl+Q"}
-                      onChange={(revealHotkey) => set({ revealHotkey })}
-                    />
+                    <HotkeyField value={s.revealHotkey || "Ctrl+Q"} onChange={(revealHotkey) => set({ revealHotkey })} />
                   </div>
-                  <p className="hint">两键要在约 0.4 秒内一起按下。不改变钉住；松开后若鼠标不在岛上会收起。</p>
+                  <p className="hint">两键要在约 0.4 秒内一起按下。只把岛叫出来，松开不收起，也不打开窗口。</p>
                 </>
               ) : null}
-              <div className="toggle" onClick={() => set({ autoHideHover: !s.autoHideHover })}>
-                <span>悬停展开</span>
-                <div className={`sw ${s.autoHideHover ? "on" : ""}`}><i /></div>
-              </div>
+              <Switch label="悬停唤出" checked={!!s.autoHideHover} onChange={(_, d) => set({ autoHideHover: d.checked })} />
               {s.autoHideHover ? (
-                <p className="hint">鼠标移到原来岛的位置附近，停超过 1 秒就会展开。</p>
+                <p className="hint">鼠标移到岛原来的位置附近，停超过 1 秒，只把岛叫出来，不打开窗口。</p>
               ) : (
-                <p className="hint">关掉后，用快捷键或托盘「展开面板」唤出。</p>
+                <p className="hint">关掉后，用快捷键把岛叫出来，或用托盘「打开窗口」。</p>
               )}
             </>
           ) : (
-            <p className="hint">打开后，折叠岛会在无人使用时收进屏幕边缘。</p>
+            <p className="hint">打开后，岛会在无人使用时收进屏幕上沿。</p>
           )}
         </div>
       )}
 
       {page === "remind" && (
-        <div className="set-body">
-          <p className="set-lead">到点弹出折叠大小的提醒：加粗课名、底栏倒计时，置顶 10 秒后收回。</p>
-          <div className="toggle" onClick={() => set({ classRemind: !s.classRemind })}>
-            <span>上课提醒</span>
-            <div className={`sw ${s.classRemind ? "on" : ""}`}><i /></div>
-          </div>
+        <div key={page} className="stack settings-sub-content">
+          <p className="hint">到点在岛上弹出 40px 的提醒：加粗课名、倒计时，置顶约 10 秒后收回。点这下岛会打开窗口。</p>
+          <Switch label="上课提醒" checked={!!s.classRemind} onChange={(_, d) => set({ classRemind: d.checked })} />
           {s.classRemind ? (
             <>
-              <label>上课前多少分钟提醒</label>
-              <DebouncedNumber
-                value={s.classRemindMinutes ?? 15}
-                fallback={15}
-                min={1}
-                max={180}
-                integer
-                onCommit={(classRemindMinutes) => set({ classRemindMinutes })}
-              />
+              <Field label="上课前多少分钟提醒">
+                <SpinButton
+                  min={1}
+                  max={180}
+                  step={1}
+                  value={s.classRemindMinutes ?? 15}
+                  onChange={(_, data) => {
+                    const n = data.value ?? Math.floor(Number(data.displayValue));
+                    if (Number.isFinite(n) && n >= 1 && n <= 180) set({ classRemindMinutes: n });
+                  }}
+                />
+              </Field>
               <p className="hint">只填整数。默认 15 分钟。</p>
-              <button type="button" className="ghost" onClick={onPreviewRemind}>
-                预览动效
-              </button>
+              <Button appearance="secondary" onClick={onPreviewRemind}>预览动效</Button>
             </>
           ) : null}
         </div>

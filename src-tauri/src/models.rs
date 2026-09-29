@@ -160,6 +160,9 @@ pub struct ElecInfo {
     pub room_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_read_at: Option<String>,
+    /// 23:00–06:00 电费接口没连上，度数是上一次成功的读数。
+    #[serde(default)]
+    pub stale: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,10 +195,10 @@ pub struct AppSettings {
     /// 折叠后自动藏进屏幕上沿。
     #[serde(default = "default_true")]
     pub auto_hide: bool,
-    /// 自动隐藏后，用全局快捷键唤出并展开。
+    /// 自动隐藏后，用全局快捷键把岛叫出来。不打开窗口。
     #[serde(default = "default_true")]
     pub auto_hide_hotkey: bool,
-    /// 自动隐藏后，在隐藏处悬停 1 秒唤出并展开。
+    /// 自动隐藏后，在隐藏处悬停 1 秒把岛叫出来。不打开窗口。
     #[serde(default = "default_true")]
     pub auto_hide_hover: bool,
     #[serde(default = "default_reveal_hotkey")]

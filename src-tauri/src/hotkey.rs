@@ -98,6 +98,24 @@ pub fn raise_noactivate(win: &WebviewWindow) {
     let _ = win;
 }
 
+/// 把工作区窗口带到前面。必须在 UI 线程调用。
+/// 不用 `WebviewWindow::set_focus`：它在抢焦点失败时会注入 Alt，Windows 会弹出标题栏系统菜单，连点会卡死。
+pub fn focus_without_menu(win: &WebviewWindow) {
+    #[cfg(windows)]
+    win::focus_without_menu(win);
+    #[cfg(not(windows))]
+    {
+        let _ = win.set_focus();
+    }
+}
+
+/// 拦住岛窗口的非客户区绘制。必须在 UI 线程、窗口创建之后调用一次。
+pub fn block_island_caption(win: &WebviewWindow) {
+    #[cfg(windows)]
+    win::block_island_caption(win);
+    let _ = win;
+}
+
 /// Clip the HWND to the island's CSS radius so Windows doesn't draw a square frame.
 pub fn clip_round(win: &WebviewWindow) {
     #[cfg(windows)]
@@ -222,6 +240,8 @@ fn emit_reveal() {
     let app2 = app.clone();
     let _ = app.run_on_main_thread(move || {
         if let Some(w) = app2.get_webview_window("main") {
+            let _ = w.set_decorations(false);
+            let _ = w.set_shadow(false);
             let _ = w.show();
             let _ = w.set_always_on_top(true);
             raise_noactivate(&w);
@@ -319,6 +339,7 @@ mod win {
             cy: i32,
             flags: u32,
         ) -> i32;
+        fn SetForegroundWindow(hwnd: *mut c_void) -> i32;
         fn SetWindowsHookExW(
             id: i32,
             lpfn: Option<unsafe extern "system" fn(i32, usize, isize) -> isize>,
@@ -332,6 +353,19 @@ mod win {
         fn DispatchMessageW(msg: *const Msg) -> isize;
         fn GetCursorPos(pt: *mut Point) -> i32;
         fn SetWindowRgn(hwnd: *mut c_void, rgn: *mut c_void, redraw: i32) -> i32;
+    }
+
+    #[link(name = "comctl32")]
+    extern "system" {
+        fn SetWindowSubclass(
+            hwnd: *mut c_void,
+            pfn: Option<
+                unsafe extern "system" fn(*mut c_void, u32, usize, isize, usize, usize) -> isize,
+            >,
+            id: usize,
+            data: usize,
+        ) -> i32;
+        fn DefSubclassProc(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize;
     }
 
     #[link(name = "kernel32")]
@@ -421,6 +455,80 @@ mod win {
                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
                 );
             }
+        }
+    }
+
+    /// HWND_TOP。不是 HWND_TOPMOST，工作区窗口不该置顶。
+    const HWND_TOP: isize = 0;
+    const DWMWA_NCRENDERING_POLICY: u32 = 2;
+    const DWMNCRP_DISABLED: i32 = 1;
+    const WM_NCHITTEST: u32 = 0x0084;
+    const WM_NCPAINT: u32 = 0x0085;
+    const WM_NCACTIVATE: u32 = 0x0086;
+    const HTCLIENT: isize = 1;
+    /// Windows 10/11 用这两条未公开消息在无边框窗口被点中时画出最小化/最大化按钮。
+    const WM_NCUAHDRAWCAPTION: u32 = 0x00AE;
+    const WM_NCUAHDRAWFRAME: u32 = 0x00AF;
+    const ISLAND_SUBCLASS_ID: usize = 0x6E64;
+
+    pub fn focus_without_menu(win: &WebviewWindow) {
+        let Ok(hwnd) = win.hwnd() else {
+            return;
+        };
+        unsafe {
+            SetWindowPos(
+                hwnd.0,
+                HWND_TOP as *mut c_void,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            );
+            let _ = SetForegroundWindow(hwnd.0);
+        }
+    }
+
+    fn disable_nc_rendering(hwnd: *mut c_void) {
+        let policy = DWMNCRP_DISABLED;
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_NCRENDERING_POLICY,
+                &policy as *const i32 as *const c_void,
+                4,
+            );
+        }
+    }
+
+    pub fn block_island_caption(win: &WebviewWindow) {
+        let Ok(hwnd) = win.hwnd() else {
+            return;
+        };
+        disable_nc_rendering(hwnd.0);
+        unsafe {
+            let _ = SetWindowSubclass(hwnd.0, Some(island_nc_proc), ISLAND_SUBCLASS_ID, 0);
+        }
+    }
+
+    unsafe extern "system" fn island_nc_proc(
+        hwnd: *mut c_void,
+        msg: u32,
+        wparam: usize,
+        lparam: isize,
+        _id: usize,
+        _data: usize,
+    ) -> isize {
+        match msg {
+            // 岛不可缩放。若交给 DefWindowProc，客户区顶部会被当成标题栏：
+            // 点一下画出最小化按钮，连点则进入系统的模态拖动循环并卡死。
+            WM_NCHITTEST => HTCLIENT,
+            WM_NCUAHDRAWCAPTION | WM_NCUAHDRAWFRAME | WM_NCPAINT => 0,
+            WM_NCACTIVATE => {
+                let _ = DefSubclassProc(hwnd, msg, wparam, -1);
+                1
+            }
+            _ => DefSubclassProc(hwnd, msg, wparam, lparam),
         }
     }
 

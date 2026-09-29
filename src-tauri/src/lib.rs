@@ -14,7 +14,10 @@ mod webvpn;
 use client::{
     aggregate_month, load_month_cache, month_cache_fresh, save_month_cache, NeuClient, SessionState,
 };
-use course::{apply_semester, load_semester, save_semester, semester_cache_stale};
+use course::{
+    apply_semester, fetched_local_date, load_semester, save_semester, semester_cache_stale,
+    should_fetch_courses,
+};
 
 fn week1_opt(s: &str) -> Option<&str> {
     let t = s.trim();
@@ -26,7 +29,7 @@ fn week1_opt(s: &str) -> Option<&str> {
 }
 use error::Result;
 use models::*;
-use chrono::{Datelike, Timelike};
+use chrono::{Datelike, NaiveDate, Timelike};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -45,7 +48,17 @@ pub struct AppState {
     snapshot: Mutex<Snapshot>,
     pending_login: Mutex<Option<PendingLogin>>,
     pause_bills: AtomicBool,
+    desk_open_lock: Mutex<()>,
+    /// 刷新串行。避免定时任务和手动刷新同时写 snapshot。
+    refresh_gate: AsyncMutex<()>,
+    /// 自动课表同步今天已经打过教务（不论成败）。手动刷新不受这一天限制。
+    course_attempt_day: Mutex<Option<NaiveDate>>,
     data_dir: PathBuf,
+}
+
+/// 23:00–06:00 电费系统经常连不上。这段时间失败就留缓存，不标同步失败。
+fn elec_night(hour: u32) -> bool {
+    hour >= 23 || hour < 6
 }
 
 async fn ensure_client(state: &AppState) -> Result<Arc<NeuClient>> {
@@ -183,7 +196,7 @@ fn island_logical_width(win: &WebviewWindow) -> f64 {
 
 fn clamp_pos(win: &WebviewWindow, x: f64, y: f64) -> (f64, f64) {
     let mut x = x;
-    // 旧默认距顶 8px；贴顶时展开上沿不应留空。
+    // 旧默认距顶 8px；贴顶时上沿不应留空。
     let mut y = if y <= 8.0 { 0.0 } else { y };
     let ww = island_logical_width(win);
     if let Ok(Some(m)) = win.current_monitor() {
@@ -312,7 +325,7 @@ fn get_settings(state: State<AppState>) -> AppSettings {
 }
 
 #[tauri::command]
-fn save_settings(state: State<AppState>, mut settings: AppSettings) -> Result<AppSettings> {
+fn save_settings(app: AppHandle, state: State<AppState>, mut settings: AppSettings) -> Result<AppSettings> {
     {
         let mut g = state.settings.lock().unwrap();
         settings.island_x = g.island_x;
@@ -341,6 +354,7 @@ fn save_settings(state: State<AppState>, mut settings: AppSettings) -> Result<Ap
         let mut snap = state.snapshot.lock().unwrap();
         apply_semester(&mut snap, sem, week1_opt(&settings.week1_monday));
     }
+    let _ = app.emit("settings-updated", &settings);
     Ok(settings)
 }
 
@@ -408,19 +422,22 @@ fn mark_logged_in(state: &AppState, username: &str) {
 
 fn reveal_running_instance(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_decorations(false);
+        let _ = w.set_shadow(false);
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_always_on_top(true);
         crate::hotkey::raise_noactivate(&w);
     }
-    let _ = app.emit("island-expand", ());
+    let _ = app.emit("island-reveal", ());
+    let _ = open_desk_window(app);
 }
 
 fn spawn_refresh(app: AppHandle) {
     let _ = app.emit("auth-status", "syncing");
     tauri::async_runtime::spawn(async move {
         if let Some(state) = app.try_state::<AppState>() {
-            match refresh_inner(&state).await {
+            match refresh_inner(&state, true).await {
                 Ok(snap) => {
                     let status = if snap.offline {
                         "idle"
@@ -518,11 +535,14 @@ fn set_bills_open(state: State<AppState>, open: bool) {
 }
 
 #[tauri::command]
-async fn refresh(state: State<'_, AppState>) -> Result<Snapshot> {
-    if !crate::util::online() {
-        return Ok(apply_offline(&state));
-    }
-    refresh_inner(&state).await
+async fn refresh(app: AppHandle, state: State<'_, AppState>) -> Result<Snapshot> {
+    let snap = if !crate::util::online() {
+        apply_offline(&state)
+    } else {
+        refresh_inner(&state, true).await?
+    };
+    let _ = app.emit("snapshot-updated", &snap);
+    Ok(snap)
 }
 
 #[tauri::command]
@@ -561,7 +581,8 @@ async fn load_month(state: State<'_, AppState>, year: i32, month: u32) -> Result
     Ok(snap.clone())
 }
 
-async fn refresh_inner(state: &AppState) -> Result<Snapshot> {
+async fn refresh_inner(state: &AppState, retry_courses: bool) -> Result<Snapshot> {
+    let _refresh_gate = state.refresh_gate.lock().await;
     let settings = state.settings.lock().unwrap().clone();
     let data_dir = state.data_dir.clone();
     let now = crate::clock::now();
@@ -618,28 +639,45 @@ async fn refresh_inner(state: &AppState) -> Result<Snapshot> {
             snap.clone(),
         )
     };
-    let fetch_courses = cached_sem.is_none()
-        || cached_sem.as_ref().map(semester_cache_stale).unwrap_or(false);
+    let today = now.date_naive();
+    let has_course_cache = cached_sem.is_some();
+    let semester_stale = cached_sem.as_ref().map(semester_cache_stale).unwrap_or(false);
+    let fetched_today = cached_sem
+        .as_ref()
+        .and_then(|s| fetched_local_date(&s.fetched_at))
+        .map(|d| d == today)
+        .unwrap_or(false);
+    let attempted_today = state
+        .course_attempt_day
+        .lock()
+        .unwrap()
+        .is_some_and(|d| d == today);
+    let fetch_courses = should_fetch_courses(
+        has_course_cache,
+        semester_stale,
+        fetched_today,
+        attempted_today,
+        retry_courses,
+    );
+    // 有缓存时，自动任务今天只打一次。没缓存或学期过期则下次刷新继续试。
+    if fetch_courses && has_course_cache && !semester_stale && !fetched_today {
+        *state.course_attempt_day.lock().unwrap() = Some(today);
+    }
 
     let campus = c.prepare_access().await;
     let u = username.clone().unwrap_or_default();
     let bills_fresh = month_cache_fresh(&data_dir, year, month, 20 * 60);
     let pause_bills = state.pause_bills.load(Ordering::SeqCst);
-    let elec_maint = now.hour() < 6;
+    let elec_quiet = elec_night(now.hour());
     // 校外 WebVPN 已在上面种好。卡/网/电/课并行；账单依赖一卡通 SSO，等卡回来再拉。
+    // 夜里仍试电费：系统未必整晚宕着。超时短一些，失败就留缓存。
     let (card, net, elec, sem_res) = tokio::join!(
         with_timeout(22, c.fetch_card()),
         with_timeout(18, c.fetch_net(&u)),
-        async {
-            if elec_maint {
-                None
-            } else {
-                Some(with_timeout(12, c.fetch_elec(&settings.room_no)).await)
-            }
-        },
+        with_timeout(if elec_quiet { 5 } else { 12 }, c.fetch_elec(&settings.room_no)),
         async {
             if fetch_courses {
-                Some(with_timeout(22, c.fetch_semester()).await)
+                Some(with_timeout(90, c.fetch_semester()).await)
             } else {
                 None
             }
@@ -690,15 +728,11 @@ async fn refresh_inner(state: &AppState) -> Result<Snapshot> {
         Err(e) => snap.errors.net = Some(e.to_string()),
     }
     match elec {
-        None => {
-            // 0:00–6:00 电费系统维护：沿用缓存，不标失败。
-            snap.errors.elec = None;
-        }
-        Some(Ok(e)) => {
+        Ok(e) => {
             snap.elec = Some(e);
             snap.errors.elec = None;
         }
-        Some(Err(e)) => {
+        Err(e) => {
             let want = settings.room_no.trim().replace(['-', ' '], "");
             let keep = snap.elec.as_ref().is_some_and(|old| {
                 !old.unbound
@@ -714,7 +748,18 @@ async fn refresh_inner(state: &AppState) -> Result<Snapshot> {
                     snap.elec = None;
                 }
             }
-            snap.errors.elec = Some(e.to_string());
+            // 23:00–06:00 连不上就显示上次度数，不写成同步失败。
+            if elec_quiet && keep {
+                if let Some(old) = snap.elec.as_mut() {
+                    old.stale = true;
+                }
+                snap.errors.elec = None;
+            } else {
+                if let Some(old) = snap.elec.as_mut() {
+                    old.stale = false;
+                }
+                snap.errors.elec = Some(e.to_string());
+            }
         }
     }
     match bills {
@@ -781,7 +826,7 @@ async fn refresh_inner(state: &AppState) -> Result<Snapshot> {
 }
 
 #[tauri::command]
-async fn sync_courses(state: State<'_, AppState>) -> Result<Snapshot> {
+async fn sync_courses(app: AppHandle, state: State<'_, AppState>) -> Result<Snapshot> {
     if !crate::util::online() {
         return Err("当前离线，连上网络后再同步".into());
     }
@@ -804,7 +849,111 @@ async fn sync_courses(state: State<'_, AppState>) -> Result<Snapshot> {
     attach_local(&data_dir, &mut snap);
     save_snapshot_file(&data_dir, &snap);
     *state.snapshot.lock().unwrap() = snap.clone();
+    let _ = app.emit("snapshot-updated", &snap);
     Ok(snap)
+}
+
+static DESK_PLACED: AtomicBool = AtomicBool::new(false);
+
+fn center_desk_on_island(app: &AppHandle, desk: &WebviewWindow) {
+    let mon = app
+        .get_webview_window("main")
+        .and_then(|w| w.current_monitor().ok().flatten())
+        .or_else(|| desk.current_monitor().ok().flatten());
+    let Some(m) = mon else {
+        let _ = desk.center();
+        return;
+    };
+    let area = m.work_area();
+    let scale = m.scale_factor();
+    let sw = area.size.width as f64 / scale;
+    let sh = area.size.height as f64 / scale;
+    let mx = area.position.x as f64 / scale;
+    let my = area.position.y as f64 / scale;
+    let (ww, wh) = desk
+        .outer_size()
+        .ok()
+        .map(|s| (s.width as f64 / scale, s.height as f64 / scale))
+        .unwrap_or((1100.0, 720.0));
+    let x = mx + ((sw - ww) / 2.0).max(0.0);
+    let y = my + ((sh - wh) / 2.0).max(0.0);
+    let _ = desk.set_position(LogicalPosition::new(x, y));
+}
+
+fn open_desk_on_ui(app: &AppHandle) -> Result<()> {
+    let state = app
+        .try_state::<AppState>()
+        .ok_or_else(|| "应用状态尚未初始化".to_string())?;
+    // SetForegroundWindow 会泵消息。连点若在这里阻塞等同一把锁，主线程就死锁，窗口显示未响应。
+    let _open_guard = match state.desk_open_lock.try_lock() {
+        Ok(g) => g,
+        Err(std::sync::TryLockError::WouldBlock) => return Ok(()),
+        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+    };
+    let Some(desk) = app.get_webview_window("desk") else {
+        return Err("找不到工作区窗口".into());
+    };
+    if !DESK_PLACED.swap(true, Ordering::SeqCst) {
+        center_desk_on_island(app, &desk);
+    }
+    let _ = desk.unminimize();
+    desk.show().map_err(|e| e.to_string())?;
+    // 在 UI 线程里只调用 SetForegroundWindow。set_focus 失败时会注入 Alt，
+    // 岛还是前台时这个 Alt 会打开系统标题栏，连点会把消息循环卡死。
+    crate::hotkey::focus_without_menu(&desk);
+    Ok(())
+}
+
+fn open_desk_window(app: &AppHandle) -> Result<()> {
+    let app2 = app.clone();
+    app.run_on_main_thread(move || {
+        let _ = open_desk_on_ui(&app2);
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn open_desk(app: AppHandle) -> Result<()> {
+    open_desk_window(&app)
+}
+
+/// 任意门。`policy`: direct 原样打开；intranet 校园网直连、校外走 WebVPN；campus-only 不在校园网就拒绝。
+#[tauri::command]
+async fn open_door(app: AppHandle, url: String, policy: String) -> Result<()> {
+    let url = url.trim().to_string();
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("链接不正确".into());
+    }
+    let campus = tokio::task::spawn_blocking(crate::util::on_campus_net)
+        .await
+        .unwrap_or(false);
+    let target = match policy.as_str() {
+        "campus-only" => {
+            if !campus {
+                return Err("校园网网关只能在校园网里打开".into());
+            }
+            url
+        }
+        "intranet" => {
+            if campus {
+                url
+            } else {
+                crate::webvpn::encrypt_url_to_webvpn(&url)
+            }
+        }
+        _ => url,
+    };
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(target, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn preview_remind(app: AppHandle) {
+    let _ = app.emit("preview-remind", ());
 }
 
 #[tauri::command]
@@ -819,19 +968,6 @@ fn persist_island(state: State<AppState>, win: WebviewWindow) -> Result<()> {
         s.island_y = Some(y);
         save_settings_file(&state.data_dir, &s);
     }
-    Ok(())
-}
-
-#[tauri::command]
-fn set_expanded(expanded: bool, height: Option<f64>, win: WebviewWindow) -> Result<()> {
-    let h = if expanded {
-        height.unwrap_or(720.0).clamp(40.0, 720.0)
-    } else {
-        40.0
-    };
-    win.set_size(LogicalSize::new(420.0, h))
-        .map_err(|e| e.to_string())?;
-    crate::hotkey::clip_round(&win);
     Ok(())
 }
 
@@ -855,6 +991,8 @@ fn reset_island(app: AppHandle, state: State<AppState>, win: WebviewWindow) -> R
 
 #[tauri::command]
 fn raise_topmost(win: WebviewWindow) -> Result<()> {
+    let _ = win.set_decorations(false);
+    let _ = win.set_shadow(false);
     let _ = win.show();
     let _ = win.set_always_on_top(true);
     crate::hotkey::raise_noactivate(&win);
@@ -877,23 +1015,29 @@ fn set_hover_watch(watch: HoverWatch) {
 }
 
 #[tauri::command]
-fn save_agenda(state: State<AppState>, item: AgendaItem) -> Result<Snapshot> {
+fn save_agenda(app: AppHandle, state: State<AppState>, item: AgendaItem) -> Result<Snapshot> {
     let items = agenda::upsert(&state.data_dir, item)?;
     let mut snap = state.snapshot.lock().unwrap();
     snap.agenda = items;
-    Ok(snap.clone())
+    let out = snap.clone();
+    drop(snap);
+    let _ = app.emit("snapshot-updated", &out);
+    Ok(out)
 }
 
 #[tauri::command]
-fn delete_agenda(state: State<AppState>, id: String) -> Result<Snapshot> {
+fn delete_agenda(app: AppHandle, state: State<AppState>, id: String) -> Result<Snapshot> {
     let items = agenda::delete(&state.data_dir, &id)?;
     let mut snap = state.snapshot.lock().unwrap();
     snap.agenda = items;
-    Ok(snap.clone())
+    let out = snap.clone();
+    drop(snap);
+    let _ = app.emit("snapshot-updated", &out);
+    Ok(out)
 }
 
 #[tauri::command]
-async fn logout(state: State<'_, AppState>) -> Result<()> {
+async fn logout(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     state.epoch.fetch_add(1, Ordering::SeqCst);
     let remember = state.settings.lock().unwrap().remember_password;
     let user = {
@@ -911,6 +1055,8 @@ async fn logout(state: State<'_, AppState>) -> Result<()> {
             keyring_delete(&u);
         }
     }
+    let snap = state.snapshot.lock().unwrap().clone();
+    let _ = app.emit("snapshot-updated", &snap);
     Ok(())
 }
 
@@ -968,7 +1114,7 @@ async fn resume_session(app: AppHandle) {
     match session {
         Some(SessionState::Valid) => {
             let _ = app.emit("auth-status", "syncing");
-            match refresh_inner(&state).await {
+            match refresh_inner(&state, true).await {
                 Ok(snap) => {
                     let status = if snap.offline {
                         "idle"
@@ -1078,6 +1224,7 @@ pub fn run() {
     builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
         reveal_running_instance(app);
     }));
+    builder = builder.plugin(tauri_plugin_opener::init());
     builder
         .setup(|app| {
             let data_dir = app
@@ -1118,14 +1265,19 @@ pub fn run() {
                 snapshot: Mutex::new(snapshot),
                 pending_login: Mutex::new(None),
                 pause_bills: AtomicBool::new(false),
+                desk_open_lock: Mutex::new(()),
+                refresh_gate: AsyncMutex::new(()),
+                course_attempt_day: Mutex::new(None),
                 data_dir: data_dir.clone(),
             });
 
             if let Some(win) = app.get_webview_window("main") {
                 place_window(&win, &settings);
                 crate::hotkey::clip_round(&win);
+                crate::hotkey::block_island_caption(&win);
                 let handle = app.handle().clone();
                 let move_gen = Arc::new(AtomicU64::new(0));
+                let move_echo = Arc::new(AtomicBool::new(false));
                 let _ = win.on_window_event(move |ev| {
                     let Some(w) = handle.get_webview_window("main") else {
                         return;
@@ -1134,11 +1286,17 @@ pub fn run() {
                         crate::hotkey::clip_round(&w);
                     }
                     if let tauri::WindowEvent::Moved(p) = ev {
+                        // set_position 会再发一条 Moved。若再纠正，DPI 取整会把消息循环打满，窗口未响应。
+                        if move_echo.swap(false, Ordering::SeqCst) {
+                            crate::hotkey::clip_round(&w);
+                            return;
+                        }
                         let scale = w.scale_factor().unwrap_or(1.0);
                         let raw_x = p.x as f64 / scale;
                         let raw_y = p.y as f64 / scale;
                         let (x, y) = clamp_pos(&w, raw_x, raw_y);
-                        if (x - raw_x).abs() > 0.5 || (y - raw_y).abs() > 0.5 {
+                        if (x - raw_x).abs() > 2.0 || (y - raw_y).abs() > 2.0 {
+                            move_echo.store(true, Ordering::SeqCst);
                             let _ = w.set_position(LogicalPosition::new(x, y));
                         }
                         crate::hotkey::clip_round(&w);
@@ -1168,12 +1326,38 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 resume_session(boot).await;
             });
+            // 卡/网/电约 20 分钟。课表不跟这次一起打，除非今天还没同步过。
+            let ticker = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(20 * 60)).await;
+                    let Some(state) = ticker.try_state::<AppState>() else {
+                        continue;
+                    };
+                    if !crate::util::online() {
+                        continue;
+                    }
+                    if let Ok(snap) = refresh_inner(&state, false).await {
+                        let _ = ticker.emit("snapshot-updated", &snap);
+                    }
+                }
+            });
 
-            let expand = MenuItem::with_id(app, "expand", "展开面板", true, None::<&str>)?;
+            if let Some(desk) = app.get_webview_window("desk") {
+                let win = desk.clone();
+                desk.on_window_event(move |ev| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = ev {
+                        api.prevent_close();
+                        let _ = win.hide();
+                    }
+                });
+            }
+
+            let open = MenuItem::with_id(app, "open", "打开窗口", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let reset = MenuItem::with_id(app, "reset", "复位岛", true, None::<&str>)?;
             let refresh = MenuItem::with_id(app, "refresh", "刷新", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&expand, &refresh, &reset, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &refresh, &reset, &quit])?;
             let mut tray = TrayIconBuilder::new()
                 .menu(&menu)
                 .tooltip("泥洞")
@@ -1188,7 +1372,9 @@ pub fn run() {
             let _tray = tray
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => app.exit(0),
-                    "expand" => reveal_running_instance(app),
+                    "open" => {
+                        let _ = open_desk_window(app);
+                    }
                     "reset" => {
                         if let Some(w) = app.get_webview_window("main") {
                             if let Some(state) = app.try_state::<AppState>() {
@@ -1209,7 +1395,7 @@ pub fn run() {
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
                             if let Some(state) = app.try_state::<AppState>() {
-                                if let Ok(snap) = refresh_inner(&state).await {
+                                if let Ok(snap) = refresh_inner(&state, true).await {
                                     let _ = app.emit("snapshot-updated", snap);
                                 }
                             }
@@ -1236,7 +1422,9 @@ pub fn run() {
             refresh,
             load_month,
             sync_courses,
-            set_expanded,
+            open_desk,
+            open_door,
+            preview_remind,
             reset_island,
             raise_topmost,
             set_hover_watch,
@@ -1247,4 +1435,19 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("泥洞启动失败");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::elec_night;
+
+    #[test]
+    fn elec_quiet_hours_are_23_to_6() {
+        assert!(elec_night(23));
+        assert!(elec_night(0));
+        assert!(elec_night(5));
+        assert!(!elec_night(6));
+        assert!(!elec_night(11));
+        assert!(!elec_night(22));
+    }
 }

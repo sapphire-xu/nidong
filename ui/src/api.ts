@@ -1,9 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { LogicalSize } from "@tauri-apps/api/dpi";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Agenda, AppSettings, LoginOutcome, SavedCreds, Snapshot } from "./types";
-
-export const PANEL_MAX = 720;
 
 export const api = {
   bootstrap: () => invoke<Snapshot>("bootstrap"),
@@ -25,28 +21,12 @@ export const api = {
   saveAgenda: (item: Agenda) => invoke<Snapshot>("save_agenda", { item }),
   deleteAgenda: (id: string) => invoke<Snapshot>("delete_agenda", { id }),
   logout: () => invoke<void>("logout"),
-  resetIsland: () => invoke<void>("reset_island"),
   raiseTopmost: () => invoke<void>("raise_topmost"),
   setHoverWatch: (watch: { enabled: boolean; x: number; y: number; width: number; height: number }) =>
     invoke<void>("set_hover_watch", { watch }),
   setBillsOpen: (open: boolean) => invoke<void>("set_bills_open", { open }),
+  openDesk: () => invoke<void>("open_desk"),
+  openDoor: (url: string, policy: "direct" | "intranet" | "campus-only") =>
+    invoke<void>("open_door", { url, policy }),
+  previewRemind: () => invoke<void>("preview_remind"),
 };
-
-export async function setExpanded(expanded: boolean, height?: number) {
-  const w = getCurrentWindow();
-  const h = expanded ? Math.min(PANEL_MAX, Math.max(40, Math.ceil(height ?? PANEL_MAX))) : 40;
-  await w.setSize(new LogicalSize(420, h));
-  try {
-    await invoke("set_expanded", { expanded, height: h });
-  } catch {
-    /* size already set */
-  }
-}
-
-export async function focusIsland() {
-  try {
-    await getCurrentWindow().setFocus();
-  } catch {
-    /* ignore */
-  }
-}
