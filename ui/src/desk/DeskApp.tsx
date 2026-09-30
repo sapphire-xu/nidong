@@ -16,6 +16,7 @@ import {
   Info20Regular,
   Receipt20Regular,
   Settings20Regular,
+  Toolbox20Regular,
 } from "@fluentui/react-icons";
 import { api } from "../api";
 import { EventForm } from "../EventForm";
@@ -32,13 +33,15 @@ import { Home } from "./pages/Home";
 import { Login, type Sms } from "./pages/Login";
 import { Schedule } from "./pages/Schedule";
 import { SettingsPage } from "./pages/Settings";
+import { Toolbox } from "./pages/Toolbox";
 
-type Page = "home" | "schedule" | "bills" | "doors" | "settings" | "about";
+type Page = "home" | "schedule" | "bills" | "toolbox" | "doors" | "settings" | "about";
 
 const NAV: { value: Page; label: string; icon: JSX.Element }[] = [
   { value: "home", label: "主页", icon: <Home20Regular /> },
   { value: "schedule", label: "日程", icon: <CalendarLtr20Regular /> },
   { value: "bills", label: "账单", icon: <Receipt20Regular /> },
+  { value: "toolbox", label: "工具箱", icon: <Toolbox20Regular /> },
   { value: "doors", label: "任意门", icon: <DoorArrowRight20Regular /> },
   { value: "settings", label: "设置", icon: <Settings20Regular /> },
   { value: "about", label: "关于", icon: <Info20Regular /> },
@@ -355,7 +358,7 @@ export function DeskApp() {
               selectedValue={page}
               onNavItemSelect={(_, data) => {
                 const value = String(data.value || "");
-                if (value === "home" || value === "schedule" || value === "bills" || value === "doors" || value === "settings" || value === "about") {
+                if (value === "home" || value === "schedule" || value === "bills" || value === "toolbox" || value === "doors" || value === "settings" || value === "about") {
                   selectPage(value);
                 }
               }}
@@ -411,6 +414,9 @@ export function DeskApp() {
                     onSyncCourses={doSyncCourses}
                     courseSync={courseSync}
                   />
+                )}
+                {page === "toolbox" && settings && (
+                  <Toolbox settings={settings} setSettings={updateSettings} />
                 )}
                 {page === "doors" && <Doors />}
                 {page === "bills" && (

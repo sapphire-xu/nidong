@@ -1,14 +1,17 @@
 mod agenda;
+mod campus;
 mod client;
 mod clock;
 mod course;
 mod crypto;
 mod error;
 mod hotkey;
+mod ipgw;
 mod models;
 mod periods;
 mod util;
 mod webvpn;
+mod wlan;
 
 use client::{
     aggregate_month, load_month_cache, month_cache_fresh, save_month_cache, NeuClient, SessionState,
@@ -35,8 +38,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewWindow};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -53,6 +56,13 @@ pub struct AppState {
     /// 自动课表同步今天已经打过教务（不论成败）。手动刷新不受这一天限制。
     course_attempt_day: Mutex<Option<NaiveDate>>,
     data_dir: PathBuf,
+    tray_balances: Mutex<Option<TrayBalances>>,
+}
+
+struct TrayBalances {
+    card: MenuItem<tauri::Wry>,
+    net: MenuItem<tauri::Wry>,
+    elec: MenuItem<tauri::Wry>,
 }
 
 /// 23:00–06:00 电费系统经常连不上。这段时间失败就留缓存，不标同步失败。
@@ -134,6 +144,56 @@ fn keyring_delete(user: &str) {
     if let Ok(e) = keyring::Entry::new("edu.neu.nidong", user) {
         let _ = e.delete_credential();
     }
+}
+
+pub(crate) fn stored_login(state: &AppState) -> Option<(String, String)> {
+    let s = state.settings.lock().unwrap();
+    if !s.remember_password || s.last_username.trim().is_empty() {
+        return None;
+    }
+    let user = s.last_username.clone();
+    drop(s);
+    let pass = keyring_get(&user)?;
+    Some((user, pass))
+}
+
+fn tray_labels(snap: &Snapshot) -> (String, String, String) {
+    let card = match snap.card.as_ref() {
+        Some(c) => format!("校园卡  {:.2} 元", c.balance),
+        None => "校园卡  —".into(),
+    };
+    let net = match snap.net.as_ref() {
+        Some(n) => format!("网费  {:.2} 元", n.balance),
+        None => "网费  —".into(),
+    };
+    let elec = match snap.elec.as_ref() {
+        Some(e) if e.unbound => "电费  未绑定".into(),
+        Some(e) => match e.remain_kwh {
+            Some(k) => format!("电费  {} 度", k.round() as i64),
+            None => "电费  —".into(),
+        },
+        None => "电费  —".into(),
+    };
+    (card, net, elec)
+}
+
+fn sync_tray(app: &AppHandle, snap: &Snapshot) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let guard = state.tray_balances.lock().unwrap();
+    let Some(t) = guard.as_ref() else {
+        return;
+    };
+    let (card, net, elec) = tray_labels(snap);
+    let _ = t.card.set_text(card);
+    let _ = t.net.set_text(net);
+    let _ = t.elec.set_text(elec);
+}
+
+fn emit_snapshot(app: &AppHandle, snap: &Snapshot) {
+    sync_tray(app, snap);
+    let _ = app.emit("snapshot-updated", snap);
 }
 
 fn apply_autostart(enable: bool) -> Result<()> {
@@ -445,7 +505,7 @@ fn spawn_refresh(app: AppHandle) {
                     } else {
                         "idle"
                     };
-                    let _ = app.emit("snapshot-updated", snap);
+                    emit_snapshot(&app, &snap);
                     let _ = app.emit("auth-status", status);
                 }
                 Err(e) => {
@@ -540,7 +600,7 @@ async fn refresh(app: AppHandle, state: State<'_, AppState>) -> Result<Snapshot>
     } else {
         refresh_inner(&state, true).await?
     };
-    let _ = app.emit("snapshot-updated", &snap);
+    emit_snapshot(&app, &snap);
     Ok(snap)
 }
 
@@ -848,7 +908,7 @@ async fn sync_courses(app: AppHandle, state: State<'_, AppState>) -> Result<Snap
     attach_local(&data_dir, &mut snap);
     save_snapshot_file(&data_dir, &snap);
     *state.snapshot.lock().unwrap() = snap.clone();
-    let _ = app.emit("snapshot-updated", &snap);
+    emit_snapshot(&app, &snap);
     Ok(snap)
 }
 
@@ -951,6 +1011,30 @@ async fn open_door(app: AppHandle, url: String, policy: String) -> Result<()> {
 }
 
 #[tauri::command]
+async fn current_wifi() -> std::result::Result<String, String> {
+    let now = tokio::task::spawn_blocking(crate::wlan::query)
+        .await
+        .map_err(|_| "没有无线网卡".to_string())??;
+    if !now.has_adapter {
+        return Err("没有无线网卡".into());
+    }
+    let name = now.ssid.trim();
+    if !now.connected || name.is_empty() {
+        return Err("现在没有连上无线".into());
+    }
+    Ok(name.to_string())
+}
+
+#[tauri::command]
+fn open_feedback(app: AppHandle) -> Result<()> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url("mailto:xufeiyang@mails.neu.edu.cn", None::<&str>)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn preview_remind(app: AppHandle) {
     let _ = app.emit("preview-remind", ());
 }
@@ -1020,7 +1104,7 @@ fn save_agenda(app: AppHandle, state: State<AppState>, item: AgendaItem) -> Resu
     snap.agenda = items;
     let out = snap.clone();
     drop(snap);
-    let _ = app.emit("snapshot-updated", &out);
+    emit_snapshot(&app, &out);
     Ok(out)
 }
 
@@ -1031,7 +1115,7 @@ fn delete_agenda(app: AppHandle, state: State<AppState>, id: String) -> Result<S
     snap.agenda = items;
     let out = snap.clone();
     drop(snap);
-    let _ = app.emit("snapshot-updated", &out);
+    emit_snapshot(&app, &out);
     Ok(out)
 }
 
@@ -1055,7 +1139,7 @@ async fn logout(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
         }
     }
     let snap = state.snapshot.lock().unwrap().clone();
-    let _ = app.emit("snapshot-updated", &snap);
+    emit_snapshot(&app, &snap);
     Ok(())
 }
 
@@ -1069,13 +1153,13 @@ fn emit_logged_out_keep_cache(app: &AppHandle, state: &AppState, reason: &str) {
     attach_local(&state.data_dir, &mut snap);
     save_snapshot_file(&state.data_dir, &snap);
     *state.snapshot.lock().unwrap() = snap.clone();
-    let _ = app.emit("snapshot-updated", snap);
+    emit_snapshot(&app, &snap);
     let _ = app.emit("auth-status", "idle");
 }
 
 fn emit_offline(app: &AppHandle, state: &AppState) {
     let snap = apply_offline(state);
-    let _ = app.emit("snapshot-updated", snap);
+    emit_snapshot(&app, &snap);
     let _ = app.emit("auth-status", "idle");
 }
 
@@ -1122,7 +1206,7 @@ async fn resume_session(app: AppHandle) {
                     } else {
                         "idle"
                     };
-                    let _ = app.emit("snapshot-updated", snap);
+                    emit_snapshot(&app, &snap);
                     let _ = app.emit("auth-status", status);
                 }
                 Err(e) => {
@@ -1270,6 +1354,7 @@ pub fn run() {
                 refresh_gate: AsyncMutex::new(()),
                 course_attempt_day: Mutex::new(None),
                 data_dir: data_dir.clone(),
+                tray_balances: Mutex::new(None),
             });
 
             if let Some(win) = app.get_webview_window("main") {
@@ -1339,7 +1424,7 @@ pub fn run() {
                         continue;
                     }
                     if let Ok(snap) = refresh_inner(&state, false).await {
-                        let _ = ticker.emit("snapshot-updated", &snap);
+                        emit_snapshot(&ticker, &snap);
                     }
                 }
             });
@@ -1354,15 +1439,44 @@ pub fn run() {
                 });
             }
 
+            let snap_now = app.state::<AppState>().snapshot.lock().unwrap().clone();
+            let (card_t, net_t, elec_t) = tray_labels(&snap_now);
+            let card = MenuItem::with_id(app, "bal-card", card_t, true, None::<&str>)?;
+            let net = MenuItem::with_id(app, "bal-net", net_t, true, None::<&str>)?;
+            let elec = MenuItem::with_id(app, "bal-elec", elec_t, true, None::<&str>)?;
             let open = MenuItem::with_id(app, "open", "打开窗口", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let reset = MenuItem::with_id(app, "reset", "复位岛", true, None::<&str>)?;
             let refresh = MenuItem::with_id(app, "refresh", "刷新", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &refresh, &reset, &quit])?;
+            let sep = PredefinedMenuItem::separator(app)?;
+            let menu = Menu::new(app)?;
+            menu.append(&card)?;
+            menu.append(&net)?;
+            menu.append(&elec)?;
+            menu.append(&sep)?;
+            menu.append(&open)?;
+            menu.append(&refresh)?;
+            menu.append(&reset)?;
+            menu.append(&quit)?;
+            *app.state::<AppState>().tray_balances.lock().unwrap() = Some(TrayBalances {
+                card: card.clone(),
+                net: net.clone(),
+                elec: elec.clone(),
+            });
             let mut tray = TrayIconBuilder::new()
                 .menu(&menu)
                 .tooltip("泥洞")
-                .show_menu_on_left_click(true);
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|icon, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let _ = open_desk_window(icon.app_handle());
+                    }
+                });
             // Use the native 32px mark (not a downscaled 128/ICO frame) so the
             // notification-area icon stays sharp at 100–150% DPI.
             tray = tray.icon(Image::new_owned(
@@ -1397,7 +1511,7 @@ pub fn run() {
                         tauri::async_runtime::spawn(async move {
                             if let Some(state) = app.try_state::<AppState>() {
                                 if let Ok(snap) = refresh_inner(&state, true).await {
-                                    let _ = app.emit("snapshot-updated", snap);
+                                    emit_snapshot(&app, &snap);
                                 }
                             }
                         });
@@ -1405,6 +1519,7 @@ pub fn run() {
                     _ => {}
                 })
                 .build(app)?;
+            campus::spawn(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1426,6 +1541,8 @@ pub fn run() {
             open_desk,
             open_door,
             preview_remind,
+            current_wifi,
+            open_feedback,
             reset_island,
             raise_topmost,
             set_hover_watch,

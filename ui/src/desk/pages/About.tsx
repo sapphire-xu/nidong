@@ -1,4 +1,5 @@
 import { Button } from "@fluentui/react-components";
+import { api } from "../../api";
 
 export function About(props: {
   updateVersion: string | null;
@@ -17,26 +18,38 @@ export function About(props: {
         : props.checkState === "failed"
           ? "暂时检查不到更新"
           : "打开窗口时会悄悄检查一次";
+  const updateButton = props.updateVersion ? (
+    <Button appearance="secondary" disabled={props.updateBusy} onClick={props.onInstall}>
+      {props.updateBusy ? "正在下载…" : "更新并重启"}
+    </Button>
+  ) : (
+    <Button appearance="secondary" disabled={props.checkState === "checking"} onClick={props.onCheck}>
+      检查更新
+    </Button>
+  );
+
   return (
-    <div className="stack">
+    <div className="stack about-page">
       <h1 className="page-title">关于泥洞</h1>
-      <div className="about-ver">v2.0.1</div>
-      <p>非官方工具，数据只留在这台电脑上。</p>
-      <p className="hint">作者 sapphire_fic</p>
-      <p className="hint">界面控件来自 Fluent UI（MIT）。动效时长参考 WinUIonWeb，与微软无关。</p>
-      <div className="row-between">
-        <span className="hint">{status}</span>
-        {props.updateVersion ? (
-          <Button appearance="subtle" disabled={props.updateBusy} onClick={props.onInstall}>
-            {props.updateBusy ? "正在下载…" : "更新并重启"}
-          </Button>
-        ) : (
-          <Button appearance="subtle" disabled={props.checkState === "checking"} onClick={props.onCheck}>
-            检查更新
-          </Button>
-        )}
+      <p className="about-lead">非官方桌面看板工具，致力于集成多种校园生活功能，优化学生体验。</p>
+      <dl className="about-meta">
+        <dt>作者</dt>
+        <dd>sapphire_fic</dd>
+        <dt>反馈</dt>
+        <dd>
+          <button type="button" className="about-mail" onClick={() => { void api.openFeedback().catch(() => undefined); }}>
+            xufeiyang@mails.neu.edu.cn
+          </button>
+        </dd>
+      </dl>
+      <div className="about-update">
+        <div className="about-update-copy">
+          <div className="about-ver">v2.1.0</div>
+          <p className="hint">{status}</p>
+          {props.updateFailed ? <p className="hint warn">更新没有完成，稍后再试。</p> : null}
+        </div>
+        {updateButton}
       </div>
-      {props.updateFailed ? <p className="hint warn">更新没有完成，稍后再试。</p> : null}
     </div>
   );
 }

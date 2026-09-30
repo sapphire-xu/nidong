@@ -25,6 +25,7 @@ export default function App() {
   const [stowing, setStowing] = useState(false);
   const [remind, setRemind] = useState<Remind | null>(null);
   const [silentLogin, setSilentLogin] = useState(false);
+  const [campusHint, setCampusHint] = useState("");
   const [refreshUi, setRefreshUi] = useState<"idle" | "spin" | "ok">("idle");
   const [hovered, setHovered] = useState(false);
   const { now } = useClock(!!settings?.classRemind || !!remind);
@@ -52,6 +53,10 @@ export default function App() {
   const hiddenBeforeFs = useRef(false);
   const openingDeskRef = useRef(false);
   const todayCoursesRef = useRef<Course[]>([]);
+  const campusHintRef = useRef("");
+  const preHintHidden = useRef(false);
+  const hintTimer = useRef(0);
+  const hideIslandRef = useRef<() => void>(() => undefined);
 
   const theme = resolveTheme(settings?.theme);
   const loggedIn = !!snap?.loggedIn;
@@ -82,7 +87,7 @@ export default function App() {
   }, []);
 
   const hideIsland = useCallback(async () => {
-    if (!autoHideRef.current || remindRef.current || hiddenRef.current) return;
+    if (!autoHideRef.current || remindRef.current || campusHintRef.current || hiddenRef.current) return;
     const gen = ++hideGen.current;
     setStowing(true);
     await sleep(320);
@@ -159,6 +164,7 @@ export default function App() {
 
   revealIslandRef.current = revealIsland;
   startRemindRef.current = startRemind;
+  hideIslandRef.current = () => { void hideIsland(); };
 
   useEffect(() => {
     const unsubs: Array<() => void> = [];
@@ -184,6 +190,26 @@ export default function App() {
       } else if (typeof p === "string" && p.startsWith("fail:")) {
         setSilentLogin(false);
         setRefreshUi("idle");
+      }
+    }).then((f) => unsubs.push(f));
+    listen<string>("campus-hint", (e) => {
+      const text = typeof e.payload === "string" ? e.payload : "";
+      window.clearTimeout(hintTimer.current);
+      if (!text) {
+        campusHintRef.current = "";
+        setCampusHint("");
+        return;
+      }
+      if (!campusHintRef.current) preHintHidden.current = hiddenRef.current;
+      campusHintRef.current = text;
+      setCampusHint(text);
+      if (!gameFsRef.current) revealIslandRef.current();
+      if (!text.startsWith("正在")) {
+        hintTimer.current = window.setTimeout(() => {
+          campusHintRef.current = "";
+          setCampusHint("");
+          if (preHintHidden.current && autoHideRef.current && !hoveredRef.current) hideIslandRef.current();
+        }, 4000);
       }
     }).then((f) => unsubs.push(f));
     listen("island-reveal", () => {
@@ -276,12 +302,12 @@ export default function App() {
 
   useEffect(() => {
     window.clearTimeout(hideTimer.current);
-    if (!settings?.autoHide || hidden || stowing || remind || hovered) return;
+    if (!settings?.autoHide || hidden || stowing || remind || hovered || campusHint) return;
     hideTimer.current = window.setTimeout(() => {
       hideIsland();
     }, 3000);
     return () => window.clearTimeout(hideTimer.current);
-  }, [hidden, stowing, remind, hovered, settings?.autoHide, hideIsland]);
+  }, [hidden, stowing, remind, hovered, campusHint, settings?.autoHide, hideIsland]);
 
   useEffect(() => {
     if (!remind) return;
@@ -439,7 +465,9 @@ export default function App() {
   const elecWarn = elecCached && (snap?.elec?.remainKwh ?? 999) < (settings?.elecWarn ?? 10);
   const collapsedMid = remind
     ? `${remind.kind === "event" ? "即将开始" : "即将上课"} · ${remind.name}`
-    : silentLogin
+    : campusHint
+      ? campusHint
+      : silentLogin
       ? refreshUi === "spin"
         ? "同步中…"
         : "登录中…"
@@ -448,7 +476,9 @@ export default function App() {
         : day.collapsed?.mid || "今天没课";
   const collapsedAux = remind
     ? remind.start
-    : !loggedIn
+    : campusHint
+      ? ""
+      : !loggedIn
       ? "→"
       : day.collapsed?.aux
         ? day.collapsed.aux

@@ -230,6 +230,11 @@ export function SettingsPanel(props: {
 }) {
   const { settings, setSettings, semester, cacheLabel, courseSync, courseSyncErr, offline, onSync, onLogout, onPreviewRemind } = props;
   const [page, setPage] = useState<Page>("hub");
+  const [motion, setMotion] = useState<"idle" | "back">("idle");
+  const openPage = (next: Page) => {
+    setMotion(next === "hub" && page !== "hub" ? "back" : "idle");
+    setPage(next);
+  };
   const title = page === "hub" ? "设置" : PAGES.find((p) => p.id === page)?.title || "设置";
   const s = settings;
   const set = (patch: Partial<AppSettings>) => setSettings({ ...s, ...patch });
@@ -241,7 +246,7 @@ export function SettingsPanel(props: {
           <h1 className="page-title">设置</h1>
         ) : (
           <div className="settings-breadcrumb">
-            <button type="button" className="settings-breadcrumb-link" onClick={() => setPage("hub")}>设置</button>
+            <button type="button" className="settings-breadcrumb-link" onClick={() => openPage("hub")}>设置</button>
             <span aria-hidden="true">›</span>
             <h1 className="page-title">{title}</h1>
           </div>
@@ -252,9 +257,9 @@ export function SettingsPanel(props: {
       </div>
 
       {page === "hub" && (
-        <div className="set-list">
+        <div className={`set-list${motion === "back" ? " settings-hub-content" : ""}`}>
           {PAGES.map((p) => (
-            <button key={p.id} type="button" className="set-item" onClick={() => setPage(p.id)}>
+            <button key={p.id} type="button" className="set-item" onClick={() => openPage(p.id)}>
               <span className="set-icon" aria-hidden="true">{p.icon}</span>
               <strong>{p.title}</strong>
               <span className="chev" aria-hidden="true">›</span>

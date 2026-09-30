@@ -1,6 +1,6 @@
 [package]
 name = "nidong"
-version = "2.0.1"
+version = "2.1.0"
 description = "东北大学桌面小看板"
 authors = ["sapphire_fic"]
 edition = "2021"
@@ -39,6 +39,11 @@ aes = "0.8"
 hex = "0.4"
 tauri-plugin-updater = "2.13.1"
 tauri-plugin-process = "2.4.0"
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_WiFi",
+    "Win32_NetworkManagement_Ndis",
+] }
 
 [profile.release]
 panic = "abort"

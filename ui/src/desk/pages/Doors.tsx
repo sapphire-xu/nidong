@@ -32,10 +32,10 @@ const SCHOOL: Door[] = [
 ];
 
 const OTHER: Door[] = [
-  { id: "xiaozhan", name: "neu小站", tag: "非官方资源共享站", url: "https://www.xn--xhq44jb2fzpc.com/", policy: "direct", icon: <PeopleCommunity20Regular /> },
+  { id: "xiaozhan", name: "NEU小站", tag: "非官方资源共享站", url: "https://www.xn--xhq44jb2fzpc.com/", policy: "direct", icon: <PeopleCommunity20Regular /> },
   { id: "math", name: "NeuMathe", tag: "数学机考刷题", url: "https://www.neumathe.cn/", policy: "direct", icon: <Calculator20Regular /> },
   { id: "sizheng", name: "MoMofish", tag: "思政刷题", url: "https://www.momofish.top/", policy: "direct", icon: <BookOpen20Regular /> },
-  { id: "star", name: "为本项目点 star", tag: "GitHub", url: "https://github.com/sapphire-xu/nidong", policy: "direct", icon: <Star20Regular /> },
+  { id: "star", name: "为本项目点个STAR吧qwq", tag: "GitHub", url: "https://github.com/sapphire-xu/nidong", policy: "direct", icon: <Star20Regular /> },
 ];
 
 function DoorList(props: { items: Door[]; busy: string; onOpen: (door: Door) => void }) {

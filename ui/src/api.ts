@@ -29,4 +29,6 @@ export const api = {
   openDoor: (url: string, policy: "direct" | "intranet" | "campus-only") =>
     invoke<void>("open_door", { url, policy }),
   previewRemind: () => invoke<void>("preview_remind"),
+  currentWifi: () => invoke<string>("current_wifi"),
+  openFeedback: () => invoke<void>("open_feedback"),
 };

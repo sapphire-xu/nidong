@@ -109,6 +109,9 @@ export type AppSettings = {
   revealHotkey?: string;
   classRemind?: boolean;
   classRemindMinutes?: number;
+  campusWifiMode?: "off" | "offline" | "boot" | "hotspot" | "manual";
+  campusWifiSsid?: string;
+  campusHotspotSsid?: string;
 };
 
 export type SavedCreds = {

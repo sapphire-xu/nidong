@@ -207,6 +207,15 @@ pub struct AppSettings {
     pub class_remind: bool,
     #[serde(default = "default_remind_minutes")]
     pub class_remind_minutes: u32,
+    /// off / offline / boot / hotspot / manual。空和未知都当关闭。
+    #[serde(default)]
+    pub campus_wifi_mode: String,
+    /// 无线配置名，空则用 NEU。
+    #[serde(default)]
+    pub campus_wifi_ssid: String,
+    /// 模式 hotspot：离开这个网络后才去连校园网。
+    #[serde(default)]
+    pub campus_hotspot_ssid: String,
 }
 
 impl Default for AppSettings {
@@ -230,6 +239,9 @@ impl Default for AppSettings {
             reveal_hotkey: default_reveal_hotkey(),
             class_remind: true,
             class_remind_minutes: default_remind_minutes(),
+            campus_wifi_mode: String::new(),
+            campus_wifi_ssid: String::new(),
+            campus_hotspot_ssid: String::new(),
         }
     }
 }

@@ -204,8 +204,11 @@ export function Schedule(props: {
         </div>
       )}
       <div className="foot">
-        {cache ? `课表缓存于 ${cache} · ` : ""}
-        选课有变请到设置里重新同步
+        <div>日程存储于本机，不与智慧东大共享</div>
+        <div>
+          {cache ? `课表缓存于 ${cache} · ` : ""}
+          选课有变请到设置里重新同步
+        </div>
       </div>
     </div>
   );
