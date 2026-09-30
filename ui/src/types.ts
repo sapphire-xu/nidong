@@ -119,4 +119,4 @@ export type SavedCreds = {
 
 export type LoginOutcome =
   | { status: "ok" }
-  | { status: "need_sms"; phoneMask: string; captchaPng: string; ocrHint?: string | null };
+  | { status: "need_sms"; phoneMask: string; captchaPng: string };

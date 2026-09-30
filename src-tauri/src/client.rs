@@ -6,7 +6,7 @@ use crate::course::{
 use crate::crypto::{self, DEFAULT_PUB_B64};
 use crate::error::{AppError, Result};
 use crate::models::*;
-use crate::ocr;
+
 use crate::util::{
     attr_value, days_in_month, decode_bytes, extract_rsa_key, hidden_fields, input_id_value,
     on_campus_net, parse_money, phone_mask, yyyy_mm, UA,
@@ -599,15 +599,14 @@ impl NeuClient {
     async fn need_sms(&self, html: &str) -> Result<LoginOutcome> {
         self.set_sms_pending(true);
         let mask = phone_mask(html);
-        let (png, hint) = self.fetch_captcha().await?;
+        let png = self.fetch_captcha().await?;
         Ok(LoginOutcome::NeedSms {
             phone_mask: mask,
             captcha_png: png,
-            ocr_hint: hint,
         })
     }
 
-    pub async fn fetch_captcha(&self) -> Result<(String, Option<String>)> {
+    pub async fn fetch_captcha(&self) -> Result<String> {
         let ts = chrono::Local::now().timestamp_millis();
         let resp = self
             .http
@@ -615,9 +614,7 @@ impl NeuClient {
             .send()
             .await?;
         let bytes = resp.bytes().await?;
-        let b64 = STANDARD.encode(&bytes);
-        let hint = ocr::recognize(&bytes);
-        Ok((b64, hint))
+        Ok(STANDARD.encode(&bytes))
     }
 
     pub async fn send_sms(&self, captcha: &str) -> Result<()> {

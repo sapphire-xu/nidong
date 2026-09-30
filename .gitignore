@@ -9,6 +9,7 @@ Thumbs.db
 *.log
 .env
 .env.local
+*.key
 cookies.json
 snapshot.json
 bills-*.json

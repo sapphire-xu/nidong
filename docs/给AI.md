@@ -52,6 +52,7 @@ nidong/
       pages/Settings.tsx   设置页外壳，内容转给 SettingsPanel
       pages/Doors.tsx      任意门
       pages/Home.tsx       主页
+      updateCheck.ts      向 Gitee 检查新版本，失败只返回 failed
     Settings.tsx     设置表单 SettingsPanel：六类；退出登录在底部
     EventForm.tsx    添加/编辑日程，Fluent Dialog，日期是年/月/日三格
     week.ts          时钟周视图的纯布局，不读窗口
@@ -69,11 +70,11 @@ nidong/
     hotkey.rs        全局和弦快捷键、悬停热区、focus_without_menu
     models.rs        Snapshot / AppSettings / Course / AgendaItem
     crypto.rs        一号通 RSA
-    ocr.rs           图形码本机识别（接口已留，模型未嵌）
     periods.rs       南湖/浑南作息
     util.rs / webvpn.rs
   docs/              开发文档、视觉设计、本文、prototype
-  scripts/           set-now.bat / clear-now.bat 测时钟
+  scripts/           set-now.bat / clear-now.bat 测时钟；release.bat 打带签名的安装包
+  updates/latest.example.json   更新清单示例。不要改名成 latest.json 拿去当线上文件
 ```
 
 旧开发文档里的 `auth/cas.rs`、`fetch/card.rs` 分包还没拆，抓数都在 `client.rs`。
@@ -166,7 +167,7 @@ nidong/
 
 学校站点：校园网网关 `https://ipgw.neu.edu.cn/`（仅校园网）、校园邮箱 `https://mails.neu.edu.cn/`（新生指南里的学生邮箱；教师邮箱是另一台 `mail.neu.edu.cn`）、教务 `https://jwxt.neu.edu.cn/jwapp/sys/homeapp/index.do`、知网 `https://www.cnki.net/`、一号通门户 `https://portal.neu.edu.cn/tp_up/`。
 
-其他：neu小站 `https://www.xn--xhq44jb2fzpc.com/`、数学机考 `https://www.neumathe.cn/`、思政 `https://www.momofish.top/`、本仓库 `https://github.com/sapphire-xu/nidong`。
+其他：neu小站 `https://www.xn--xhq44jb2fzpc.com/`（标签「非官方资源共享站」）、NeuMathe `https://www.neumathe.cn/`（标签「数学机考刷题」）、MoMofish `https://www.momofish.top/`（标签「思政刷题」）、本仓库 `https://github.com/sapphire-xu/nidong`。
 
 学校 URL 只许来自开发文档里已实测的地址，或用户明确给过的这几条。不要再猜门户上的链接。
 
@@ -249,6 +250,9 @@ nidong/
 - 抓数失败时不要用 0 覆盖上次的真实流量/余额，除非接口明确返回 0
 - 不要把 `SEGOEICONS.TTF` 或 WinUIonWeb 源码打进仓库。图标用 `@fluentui/react-icons` 的按名导入
 - 不要按界面改造计划或 prototype 把导航改回五项、把电费夜里逻辑改回跳过查询
+- 不要把 `%USERPROFILE%\.tauri\nidong.key` 写进仓库、Gitee 或 GitHub。公钥已经在 `tauri.conf.json`，私钥丢了之后发出去的安装包收不到后续更新
+- 不要在检查更新失败时弹窗、改岛或挡住主页。正式包打开窗口时静默检查；只有关于页手动检查失败才写「暂时检查不到更新」
+- 不要发现新版本就自动下载。下载只发生在用户点「更新并重启」之后
 
 ## 托盘（右键通知区图标）
 
@@ -258,8 +262,18 @@ nidong/
 
 在 `src-tauri` 里 `cargo test --lib`。`client::tests::login_live` 会打学校网络，默认 ignore。前端 `npx tsc --noEmit`。这是桌面窗口，浏览器里打不开岛。
 
+## 自动更新
+
+插件是 `tauri-plugin-updater` 和 `tauri-plugin-process`。公钥、检查地址、Windows 安装方式 `passive` 写在 `tauri.conf.json` 的 `plugins.updater`。地址是 `https://gitee.com/sapphire_fic/nidong/raw/master/updates/latest.json`。Gitee 仓库是公开的，默认分支是 `master`。清单字段见 `updates/latest.example.json`：`version` 必须高于正在运行的版本，`platforms.windows-x86_64.signature` 是 `.sig` 全文，`url` 指向安装包本身。
+
+能力在 `src-tauri/capabilities/default.json`：`updater:default`、`process:allow-restart`。插件在 `lib.rs` 里跟 opener 一样 `plugin(...)`。前端检查在 `ui/src/desk/updateCheck.ts`，状态和按钮在 `DeskApp.tsx`，关于页只显示。
+
+正式包（`import.meta.env.PROD`）打开工作区时静默 `check`，超时 20 秒。`npm start` 不自动打 Gitee。关于页「检查更新」总会打。有新版本时，主内容上方一条：版本、`更新并重启`、`稍后`（这次打开先藏起来，关于页仍可安装）。点更新才 `downloadAndInstall`，然后 `relaunch`。Windows 上安装程序会先退出泥洞，剩下的是 NSIS 的小进度窗。检查走插件自带的 rustls，和抓数用的 native-tls 不是同一条。校园网拦 TLS 时检查失败，保持安静，不要为了这个去改 TLS。
+
+GitHub 上的 v2.0.0 安装包没有这个插件，不能自己更新。第一份带更新的安装包版本要高于 2.0.0，用户手动装一次。
+
 ## 打包与开源
 
-Windows 安装包：`npx tauri build`，NSIS 简体中文，产物 `src-tauri/target/release/bundle/nsis/泥洞_<version>_x64-setup.exe`。图标用 BMP-in-ICO（16/24/32/48/64/256），`installerIcon` 指向 `icons/icon.ico`。
+带签名的 Windows 安装包用仓库根目录的 `scripts\release.bat`。它要求私钥在 `%USERPROFILE%\.tauri\nidong.key`，口令为空，再跑 `npx tauri build`。`bundle.createUpdaterArtifacts` 已打开，没有这把私钥时 `tauri build` 会失败。`tauri dev` 不打包，不读私钥。NSIS 简体中文，产物 `src-tauri/target/release/bundle/nsis/泥洞_<version>_x64-setup.exe`，旁边的 `.sig` 全文贴进 Gitee 的 `updates/latest.json`。先上传安装包，再改清单。图标用 BMP-in-ICO（16/24/32/48/64/256），`installerIcon` 指向 `icons/icon.ico`。
 
-开源仓库：https://github.com/sapphire-xu/nidong 。安装包放 GitHub Release，不要把 `target/`、`tmp/`、cookie、snapshot 推进 git。用户向 README 写功能和使用方法；实现细节仍以本文为准。
+开源仓库：https://github.com/sapphire-xu/nidong 。安装包可以放 GitHub Release，更新用的那份放 Gitee Release，清单放 Gitee 仓库的 `updates/latest.json`。不要把 `target/`、`tmp/`、cookie、snapshot、私钥推进 git。用户向 README 写功能和使用方法；实现细节仍以本文为准。

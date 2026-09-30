@@ -3,7 +3,7 @@ import { Button, Field, Input, Switch } from "@fluentui/react-components";
 import { api } from "../../api";
 import type { AppSettings } from "../../types";
 
-type Sms = { phone: string; png: string; ocr: string; code: string; graphic: string; trust: boolean };
+type Sms = { phone: string; png: string; code: string; graphic: string; trust: boolean };
 
 export function Login(props: {
   settings: AppSettings | null;
@@ -68,8 +68,7 @@ export function Login(props: {
         props.setSms({
           phone: out.phoneMask,
           png: out.captchaPng,
-          ocr: out.ocrHint || "",
-          graphic: out.ocrHint || "",
+          graphic: "",
           code: "",
           trust: true,
         });
@@ -93,8 +92,8 @@ export function Login(props: {
     setCaptchaBusy(true);
     setErr("");
     try {
-      const [png, hint] = await api.refreshCaptcha();
-      props.setSms((s) => ({ ...s, png, ocr: hint || "", graphic: hint || "" }));
+      const png = await api.refreshCaptcha();
+      props.setSms((s) => ({ ...s, png, graphic: "" }));
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -164,7 +163,7 @@ export function Login(props: {
                 autoComplete="off"
                 value={props.sms.graphic}
                 placeholder="图形码"
-                onChange={(_, d) => props.setSms((s) => ({ ...s, graphic: d.value, ocr: "" }))}
+                onChange={(_, d) => props.setSms((s) => ({ ...s, graphic: d.value }))}
                 onKeyDown={(e) => e.key === "Enter" && sendSmsCode()}
               />
               <img
@@ -176,7 +175,6 @@ export function Login(props: {
               />
             </div>
           </Field>
-          {props.sms.ocr ? <p className="hint">本机已识别，不对就改 · 图不离开这台电脑</p> : null}
           <Button appearance="subtle" disabled={captchaBusy} onClick={() => refreshCaptcha()}>
             {captchaBusy ? "正在换图…" : "看不清，换一张"}
           </Button>
@@ -207,7 +205,7 @@ export function Login(props: {
               setErr("");
               setSmsWait(0);
               setSmsHint("");
-              props.setSms((s) => ({ ...s, code: "", graphic: "", png: "", ocr: "" }));
+              props.setSms((s) => ({ ...s, code: "", graphic: "", png: "" }));
               try { await api.cancelSms(); } catch { /* ignore */ }
               props.setStep("login");
             }}

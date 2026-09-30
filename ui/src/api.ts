@@ -11,7 +11,7 @@ export const api = {
   persistIsland: () => invoke<void>("persist_island"),
   login: (username: string, password: string, rememberPassword: boolean, autoLogin: boolean) =>
     invoke<LoginOutcome>("login", { username, password, rememberPassword, autoLogin }),
-  refreshCaptcha: () => invoke<[string, string | null]>("refresh_captcha"),
+  refreshCaptcha: () => invoke<string>("refresh_captcha"),
   sendSms: (captcha: string) => invoke<void>("send_sms", { captcha }),
   cancelSms: () => invoke<void>("cancel_sms"),
   submitSms: (sms: string, trust: boolean) => invoke<LoginOutcome>("submit_sms", { sms, trust }),

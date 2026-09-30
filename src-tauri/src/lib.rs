@@ -6,7 +6,6 @@ mod crypto;
 mod error;
 mod hotkey;
 mod models;
-mod ocr;
 mod periods;
 mod util;
 mod webvpn;
@@ -493,7 +492,7 @@ async fn login(
 }
 
 #[tauri::command]
-async fn refresh_captcha(state: State<'_, AppState>) -> Result<(String, Option<String>)> {
+async fn refresh_captcha(state: State<'_, AppState>) -> Result<String> {
     live_client(&state).await?.fetch_captcha().await
 }
 
@@ -1225,6 +1224,8 @@ pub fn run() {
         reveal_running_instance(app);
     }));
     builder = builder.plugin(tauri_plugin_opener::init());
+    builder = builder.plugin(tauri_plugin_process::init());
+    builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder
         .setup(|app| {
             let data_dir = app

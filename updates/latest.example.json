@@ -1,0 +1,11 @@
+{
+  "version": "2.0.1",
+  "notes": "写给用户的更新说明",
+  "pub_date": "2026-09-29T00:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "换成安装包旁边 .sig 文件的全文",
+      "url": "https://gitee.com/sapphire_fic/nidong/releases/download/v2.0.1/nidong_2.0.1_x64-setup.exe"
+    }
+  }
+}

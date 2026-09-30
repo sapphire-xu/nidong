@@ -62,11 +62,23 @@
       "icons/256x256.png",
       "icons/icon.ico"
     ],
+    "createUpdaterArtifacts": true,
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico",
         "languages": ["SimpChinese"],
         "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc3QjUyMUFFOTBDNEZENTEKUldSUi9jU1FyaUcxZDZhbWk1NVVvQlFmSEtzNDkycUdrNHRka3UrNDRzZGhvbWpGaDIvRGc3dmMK",
+      "endpoints": [
+        "https://gitee.com/sapphire_fic/nidong/raw/master/updates/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

@@ -271,7 +271,5 @@ pub enum LoginOutcome {
         phone_mask: String,
         #[serde(rename = "captchaPng")]
         captcha_png: String,
-        #[serde(rename = "ocrHint")]
-        ocr_hint: Option<String>,
     },
 }

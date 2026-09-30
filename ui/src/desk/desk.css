@@ -65,6 +65,30 @@ button, input, textarea { font: inherit; }
   flex-direction: column;
   gap: 8px;
 }
+.update-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--colorBrandStroke2);
+  background: color-mix(in srgb, var(--colorBrandBackground) 7%, var(--colorNeutralBackground1));
+  font-size: 13px;
+}
+.update-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.update-bar .hint { margin: 0; }
 .desk-pending {
   display: flex;
   align-items: center;

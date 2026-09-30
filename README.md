@@ -1,12 +1,14 @@
 # 泥洞
 
+非官方工具，与东北大学及其信息化部门无关，不要当成学校正式应用。
+
+只在你自己的电脑上运行。学号、密码、cookie、账单和课表都留在本机，不上传到作者的服务器。抓取用的是你自己的一号通，只访问学校已经提供的页面和接口。学校的页面、接口和数据归东北大学，本仓库只包含泥洞自己的代码。
+
+不适用于东北大学秦皇岛分校。
+
 东北大学桌面看板。一条岛贴在屏幕上沿，点一下打开窗口，看校园卡、网费、电费、今日课表和本机日程。
 
 作者 [sapphire_fic](https://github.com/sapphire-xu)。
-
-> 东北大学桌面看板，致力于解决官方平台不便捷的问题。
-
-不适用于东北大学秦皇岛分校。
 
 ## 功能介绍
 
@@ -39,7 +41,7 @@ macOS 安装包这一版还没有。
 ### 第一次
 
 1. 打开后岛上登录。学号、密码是**东北大学一号通**（和信息门户同一套）。
-2. 新设备可能要图形验证码 + 短信二次认证。图形码可改，短信必须本人填。
+2. 新设备可能要图形验证码和短信。图形码和短信都由本人填写，程序不识别图形码。
 3. 登录后会同步校园卡、网费、电费和课表。折叠岛上写「同步中…」时请等它走完。
 4. 电费：打开窗口 → **设置** → **宿舍与余额** → 填电费房间码（和学校电费页同一个）。留空表示还没绑定。
 5. 课表周次不对：**设置** → **课表** → 填本学期第一周的周一，必要时点「重新同步」。
@@ -97,14 +99,11 @@ npm start
 
 或双击仓库根目录的 `启动.bat`。首次仍用一号通学号密码登录。
 
-打 Windows 安装包：
+打带更新签名的 Windows 安装包：双击 `scripts\release.bat`。它读取 `%USERPROFILE%\.tauri\nidong.key`（口令为空）再打包。这把私钥不要提交，也不要上传到 Gitee 或 GitHub。没有它时直接 `npx tauri build` 会失败。
 
-```bash
-npm run build
-npx tauri build
-```
+产物在 `src-tauri/target/release/bundle/nsis/泥洞_2.0.0_x64-setup.exe`，旁边有同名 `.sig`。GitHub Release 里的文件名是 `nidong_2.0.0_x64-setup.exe`（同一份安装包）。
 
-产物在 `src-tauri/target/release/bundle/nsis/泥洞_2.0.0_x64-setup.exe`。GitHub Release 里的文件名是 `nidong_2.0.0_x64-setup.exe`（同一份安装包）。
+自动更新的清单在 [Gitee 仓库](https://gitee.com/sapphire_fic/nidong) 的 `updates/latest.json`，格式见 `updates/latest.example.json`。先上传安装包，再把 `.sig` 全文写进清单，清单版本要高于正在使用的版本。已经装了 v2.0.0 的人需要手动再装一次带更新功能的版本，之后打开窗口会自己检查，点「更新并重启」才下载。
 
 测上课提醒可以把「现在」拨到开课前：`scripts\set-now.bat`，测完 `scripts\clear-now.bat`。说明见 [docs/给AI.md](docs/给AI.md)。
 

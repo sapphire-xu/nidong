@@ -371,7 +371,6 @@
       cursor: pointer; font-size: 12px; padding: 0; white-space: nowrap;
     }
     .link:hover { text-decoration: underline; }
-    .ocr-ok { font-size: 11px; color: var(--ok); margin-top: 6px; }
 
     .collapsed-row, .topbar, .bill-head { cursor: grab; }
     .collapsed-row button, .topbar button, .bill-head button, .text-btn { cursor: pointer; }
@@ -576,7 +575,6 @@
       hover: null,
       courseTip: null,
       captcha: "K7P2",
-      ocr: "K7P2",
       week: 3,
       dow: 1,
       pos: "center",
@@ -800,10 +798,9 @@
         <div class="hint">绑定手机 *******1479</div>
         <label>图形验证码 · 学校的，不是泥洞的</label>
         <div class="sms-row">
-          <input type="text" value="${ui.ocr}" style="flex:1" />
+          <input type="text" placeholder="图形码" style="flex:1" />
           <div class="captcha">${ui.captcha}</div>
         </div>
-        <div class="ocr-ok">本机已识别，不对就改 · 图不离开这台电脑</div>
         <label>短信码</label>
         <div class="sms-row">
           <input type="text" placeholder="6 位" maxlength="6" style="flex:1" />
@@ -963,7 +960,6 @@
       if (e.target.closest(".captcha")) {
         const next = ["K7P2", "8M3Q", "R2NX"][Math.floor(Math.random() * 3)];
         ui.captcha = next;
-        ui.ocr = next;
         render();
       }
     });

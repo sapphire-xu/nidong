@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
+  Button,
   FluentProvider,
   NavDrawer,
   NavDrawerBody,
   NavItem,
 } from "@fluentui/react-components";
+import { relaunch } from "@tauri-apps/plugin-process";
+import type { Update } from "@tauri-apps/plugin-updater";
 import {
   CalendarLtr20Regular,
   DoorArrowRight20Regular,
@@ -20,6 +23,7 @@ import { cacheDayLabel } from "../course";
 import { resolveTheme, withSettingDefaults } from "../prefs";
 import type { Agenda, AppSettings, DaySpend, LoginOutcome, Snapshot } from "../types";
 import { useClock } from "../useClock";
+import { lookForUpdate } from "./updateCheck";
 import { nidongDarkTheme, nidongLightTheme } from "./theme";
 import { About } from "./pages/About";
 import { Bills } from "./pages/Bills";
@@ -40,7 +44,9 @@ const NAV: { value: Page; label: string; icon: JSX.Element }[] = [
   { value: "about", label: "关于", icon: <Info20Regular /> },
 ];
 
-const emptySms = (): Sms => ({ phone: "", png: "", ocr: "", code: "", graphic: "", trust: true });
+const emptySms = (): Sms => ({ phone: "", png: "", code: "", graphic: "", trust: true });
+
+type CheckState = "idle" | "checking" | "current" | "failed";
 
 export function DeskApp() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
@@ -67,7 +73,66 @@ export function DeskApp() {
   const pageRef = useRef(page);
   const roomAtSettings = useRef<string | null>(null);
   const refreshOkTimer = useRef(0);
+  const updateRef = useRef<Update | null>(null);
+  const checkGen = useRef(0);
+  const installing = useRef(false);
+  const mounted = useRef(true);
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [updatePhase, setUpdatePhase] = useState<"idle" | "busy" | "fail">("idle");
+  const [checkState, setCheckState] = useState<CheckState>("idle");
+  const [updateHidden, setUpdateHidden] = useState(false);
   pageRef.current = page;
+
+  async function runLook(manual: boolean) {
+    const gen = ++checkGen.current;
+    if (manual) setCheckState("checking");
+    const look = await lookForUpdate();
+    if (!mounted.current || gen !== checkGen.current) {
+      look.update?.close().catch(() => undefined);
+      return;
+    }
+    const prev = updateRef.current;
+    updateRef.current = look.update;
+    if (prev && prev !== look.update) prev.close().catch(() => undefined);
+    if (look.update) {
+      setUpdateVersion(look.update.version);
+      setUpdatePhase("idle");
+      setCheckState("idle");
+      return;
+    }
+    setUpdateVersion(null);
+    if (look.failed) {
+      if (manual) setCheckState("failed");
+      return;
+    }
+    setUpdatePhase("idle");
+    setCheckState("current");
+  }
+
+  async function installUpdate() {
+    const update = updateRef.current;
+    if (!update || installing.current) return;
+    installing.current = true;
+    setUpdatePhase("busy");
+    try {
+      await update.downloadAndInstall();
+      await relaunch();
+    } catch {
+      installing.current = false;
+      if (mounted.current) setUpdatePhase("fail");
+    }
+  }
+
+  useEffect(() => {
+    mounted.current = true;
+    if (import.meta.env.PROD) void runLook(false);
+    return () => {
+      mounted.current = false;
+      const pending = updateRef.current;
+      updateRef.current = null;
+      pending?.close().catch(() => undefined);
+    };
+  }, []);
 
   const { now, overridden } = useClock(!!settings?.classRemind || page === "schedule");
   const mode = resolveTheme(settings?.theme);
@@ -168,8 +233,7 @@ export function DeskApp() {
       setSms({
         phone: out.phoneMask,
         png: out.captchaPng,
-        ocr: out.ocrHint || "",
-        graphic: out.ocrHint || "",
+        graphic: "",
         code: "",
         trust: true,
       });
@@ -305,6 +369,18 @@ export function DeskApp() {
               </NavDrawerBody>
             </NavDrawer>
             <main className="desk-main">
+              {updateVersion && !updateHidden ? (
+                <div className="update-bar" role="status">
+                  <span>有新版本 {updateVersion}</span>
+                  <div className="update-bar-actions">
+                    {updatePhase === "fail" ? <span className="hint warn">更新没有完成，稍后再试。</span> : null}
+                    <Button appearance="subtle" disabled={updatePhase === "busy"} onClick={() => { void installUpdate(); }}>
+                      {updatePhase === "busy" ? "正在下载…" : "更新并重启"}
+                    </Button>
+                    <Button appearance="subtle" disabled={updatePhase === "busy"} onClick={() => setUpdateHidden(true)}>稍后</Button>
+                  </div>
+                </div>
+              ) : null}
               <div key={page} className="page-enter">
                 {page === "home" && (
                   <Home
@@ -366,7 +442,16 @@ export function DeskApp() {
                     }}
                   />
                 )}
-                {page === "about" && <About />}
+                {page === "about" && (
+                  <About
+                    updateVersion={updateVersion}
+                    updateBusy={updatePhase === "busy"}
+                    updateFailed={updatePhase === "fail"}
+                    checkState={checkState}
+                    onCheck={() => { void runLook(true); }}
+                    onInstall={() => { void installUpdate(); }}
+                  />
+                )}
               </div>
             </main>
           </div>
