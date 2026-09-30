@@ -101,7 +101,7 @@ npm start
 
 打带更新签名的 Windows 安装包：双击 `scripts\release.bat`。它读取 `%USERPROFILE%\.tauri\nidong.key`（口令为空）再打包。这把私钥不要提交，也不要上传到 Gitee 或 GitHub。没有它时直接 `npx tauri build` 会失败。
 
-产物在 `src-tauri/target/release/bundle/nsis/泥洞_2.0.0_x64-setup.exe`，旁边有同名 `.sig`。GitHub Release 里的文件名是 `nidong_2.0.0_x64-setup.exe`（同一份安装包）。
+产物在 `src-tauri/target/release/bundle/nsis/泥洞_<版本>_x64-setup.exe`，旁边有同名 `.sig`。GitHub Release 里已发布的文件名仍是 `nidong_2.0.0_x64-setup.exe`。
 
 自动更新的清单在 [Gitee 仓库](https://gitee.com/sapphire_fic/nidong) 的 `updates/latest.json`，格式见 `updates/latest.example.json`。先上传安装包，再把 `.sig` 全文写进清单，清单版本要高于正在使用的版本。已经装了 v2.0.0 的人需要手动再装一次带更新功能的版本，之后打开窗口会自己检查，点「更新并重启」才下载。
 

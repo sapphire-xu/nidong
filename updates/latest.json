@@ -1,0 +1,11 @@
+{
+  "version": "2.0.1",
+  "notes": "接通更新通道。这次只验证能检查到新版本并安装。",
+  "pub_date": "2026-09-30T09:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDczZ3lmOWFRYzJ0UHlrM1FrOWdrVG5GdzZGVDdoaEthUGNxOTZuMGdtbDdmblJsNmMxbFdUbHNzSllzaDVWeTlYN3ZxVjZ0TEJGZ0Z1cS93WmdtUmdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzYxNTEwCWZpbGU65rOl5rSeXzIuMC4xX3g2NC1zZXR1cC5leGUKWHFsTFJZd25hbk9DdmtUNytkK0lIbEwxYTdjaFVmWEU2cUM2YVRXaU1UUU9UcHJHbms5c0NrVFdrZkpuVDkzSFVIQTU0YkU4eW9LSlZsL3ZLV2MyRFE9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.0.1_x64-setup.exe"
+    }
+  }
+}

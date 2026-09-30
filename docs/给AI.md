@@ -29,7 +29,7 @@
 
 产品名是「泥洞」（东大戏称），开源仓库 `nidong`（https://github.com/sapphire-xu/nidong）。包 id：`edu.neu.nidong`。不是学校官方应用。不适用于秦皇岛分校。
 
-只跑在用户自己的电脑上。密码进 OS 凭据管理，cookie / 课表 / 账单 / 日程缓存在 `%APPDATA%\edu.neu.nidong`。不要把账号送到任何自建服务器。没要求发布就不要改版本号（当前 2.0.0）。
+只跑在用户自己的电脑上。密码进 OS 凭据管理，cookie / 课表 / 账单 / 日程缓存在 `%APPDATA%\edu.neu.nidong`。不要把账号送到任何自建服务器。没要求发布就不要改版本号（当前 2.0.1）。
 
 ## 技术栈（当前）
 

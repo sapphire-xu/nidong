@@ -20,7 +20,7 @@ export function About(props: {
   return (
     <div className="stack">
       <h1 className="page-title">关于泥洞</h1>
-      <div className="about-ver">v2.0.0</div>
+      <div className="about-ver">v2.0.1</div>
       <p>非官方工具，数据只留在这台电脑上。</p>
       <p className="hint">作者 sapphire_fic</p>
       <p className="hint">界面控件来自 Fluent UI（MIT）。动效时长参考 WinUIonWeb，与微软无关。</p>
