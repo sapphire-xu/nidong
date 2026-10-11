@@ -1,7 +1,7 @@
 {
   "name": "nidong",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.3.0",
   "description": "东北大学桌面看板",
   "author": "sapphire_fic",
   "license": "MIT",
@@ -22,6 +22,7 @@
     "@fluentui/react-components": "^9.74.9",
     "@fluentui/react-icons": "^2.0.343",
     "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/plugin-dialog": "^2.8.1",
     "@tauri-apps/plugin-process": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.13.1",
     "react": "^18.3.1",
