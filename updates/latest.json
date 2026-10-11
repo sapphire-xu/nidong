@@ -1,11 +1,11 @@
 {
-  "version": "2.3.0",
-  "notes": "孩子们我更新了一百万个内容",
-  "pub_date": "2026-10-11T05:53:04Z",
+  "version": "2.3.1",
+  "notes": "关于页会显示正在运行的版本。",
+  "pub_date": "2026-10-11T06:40:44Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDMyaWRNMUxDK05GZUFlTy9TVklmU1lpaHZRSjBOUmg4eTNuOWFzWU5tSGxWMWJYU2ZwZThSZmQ3YUVENzJFWE8wUzZFWldMaWV0UzZzQ1ZaQXdLc0FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjk3OTg0CWZpbGU65rOl5rSeXzIuMy4wX3g2NC1zZXR1cC5leGUKTjVYaGdjSk41azZBTWhxUDd4RFBpTGRWSkMwOEIwa0V3bnZNUy9QZFJjdC9VYi96V3huam5Wb0pEMzJYYTh0MXl5ZC95OHFzY3BVU1RpWlpQcUtGREE9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.3.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDZ5S3RFYmU3UDhYaU9WeUkvSVVLOHZzcVo5WVY5QmdsenNVay9iUmE2ZE9Nd3hITUJ0TnRJU2FndlF3bjZJWmhvUjhBR1A5WEw3bXFHSXNManVyclFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNzAwODQ0CWZpbGU65rOl5rSeXzIuMy4xX3g2NC1zZXR1cC5leGUKRFo0S2dsY3JoQ3d1UDk3QmJydnVGNVpQMmhQeVhrSDM0RlgycU95SEhibXo4NUdSR0FCL2c2alYvclpVV2E1ZlV5MURRVi8yNVI0WTgrLzBkTTNrRFE9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.3.1_x64-setup.exe"
     }
   }
 }
