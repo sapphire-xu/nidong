@@ -10,8 +10,10 @@ export function SettingsPage(props: {
   courseSyncErr?: string;
   offline?: boolean;
   onSync: () => void;
-  onLogout: () => void;
+  onLogout: (keepAgenda: boolean) => void;
   onPreviewRemind: () => void;
+  loggedIn: boolean;
+  onRequestLogin: () => void;
 }) {
   return <SettingsPanel {...props} />;
 }

@@ -107,6 +107,21 @@ mod tests {
     }
 
     #[test]
+    fn wraps_personal_portal_host() {
+        let got = encrypt_url_to_webvpn(
+            "https://personal.neu.edu.cn/portal/schedule/frontend/calendar/calendar",
+        );
+        assert!(
+            got.contains(
+                "62304135386136393339346365373340a0e4b62c85cb47d1bc166e66c800d19283ef83"
+            ),
+            "{got}"
+        );
+        assert!(got.contains("/portal/schedule/frontend/calendar/calendar"));
+        assert!(!got.contains("personal.neu.edu.cn"));
+    }
+
+    #[test]
     fn leaves_already_wrapped() {
         let u = "https://webvpn.neu.edu.cn/http/abc/foo";
         assert_eq!(encrypt_url_to_webvpn(u), u);

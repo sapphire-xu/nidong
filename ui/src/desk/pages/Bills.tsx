@@ -1,8 +1,68 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button, Tab, TabList } from "@fluentui/react-components";
 import { api } from "../../api";
 import { fmtMoney, isJunkBill, pad, ymd } from "../../format";
 import type { DaySpend, Snapshot } from "../../types";
+
+function daysInMonth(y: number, m: number) {
+  return new Date(y, m, 0).getDate();
+}
+
+const MIN_LOAD_MS = 1500;
+
+function WaveBars(props: { count: number }) {
+  const cols = useRef<(HTMLDivElement | null)[]>([]);
+  useLayoutEffect(() => {
+    const n = Math.max(props.count, 1);
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const paint = (phase: number) => {
+      const denom = Math.max(n - 1, 1);
+      for (let i = 0; i < n; i++) {
+        const el = cols.current[i];
+        if (!el) continue;
+        const x = (i / denom) * Math.PI * 2;
+        const wave = Math.sin(x - phase);
+        const along = (wave + 1) / 2;
+        el.style.height = `${(22 + along * 96).toFixed(1)}px`;
+        el.style.background = `color-mix(in srgb, var(--colorBrandBackground) ${(38 + along * 62).toFixed(1)}%, transparent)`;
+      }
+    };
+    if (reduce) {
+      paint(0.8);
+      return;
+    }
+    const t0 = performance.now();
+    let raf = 0;
+    const loop = (t: number) => {
+      paint(((t - t0) / 1000) * 2.4);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [props.count]);
+  return (
+    <>
+      {Array.from({ length: props.count }, (_, i) => (
+        <div key={i} className="col wave-col" aria-hidden="true">
+          <div className="bar wave" ref={(el) => { cols.current[i] = el; }} />
+        </div>
+      ))}
+    </>
+  );
+}
+
+function LoadingCaption() {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setStep((n) => (n + 1) % 4), 500);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <div className="bill-empty">
+      加载中<span className="load-dots">{".".repeat(step)}</span>
+    </div>
+  );
+}
 
 export function Bills(props: {
   snap: Snapshot | null;
@@ -10,6 +70,7 @@ export function Bills(props: {
   tab: "card" | "net";
   onTab: (tab: "card" | "net") => void;
   onSnap: (s: Snapshot) => void;
+  onRequestLogin: () => void;
 }) {
   const { snap, now, tab } = props;
   const [ym, setYm] = useState(() => {
@@ -22,6 +83,14 @@ export function Bills(props: {
   const [selected, setSelected] = useState(ymd(now));
   const [hover, setHover] = useState<string | null>(null);
   const [err, setErr] = useState("");
+  const [hold, setHold] = useState<{ want: string; until: number } | null>(null);
+  const holdTimer = useRef(0);
+  const pane = useRef({ tab, motion: "" as "" | "to-net" | "to-card" });
+  if (pane.current.tab !== tab) {
+    pane.current = { tab, motion: tab === "net" ? "to-net" : "to-card" };
+  }
+
+  useEffect(() => () => window.clearTimeout(holdTimer.current), []);
 
   useEffect(() => {
     const open = tab === "card";
@@ -31,55 +100,81 @@ export function Bills(props: {
     };
   }, [tab]);
 
+  const want = `${ym.y}-${pad(ym.m)}`;
+  const ready = snap?.cardMonth === want && snap.cardSpend != null;
+
   useEffect(() => {
-    if (tab !== "card") return;
-    const want = `${ym.y}-${pad(ym.m)}`;
-    if (snap?.cardMonth === want && (snap.cardSpend?.length ?? 0) > 0) return;
+    if (tab !== "card" || !snap?.loggedIn || !snap) return;
+    if (snap.cardMonth === want && snap.cardSpend != null) return;
     let cancel = false;
+    const until = performance.now() + MIN_LOAD_MS;
+    setHold({ want, until });
+    window.clearTimeout(holdTimer.current);
+    holdTimer.current = window.setTimeout(() => {
+      setHold((current) => (current && current.until === until ? null : current));
+    }, MIN_LOAD_MS);
+    setErr("");
     api.loadMonth(ym.y, ym.m).then((s) => {
-      if (!cancel) props.onSnap(s);
-    }).catch(() => undefined);
+      if (cancel) return;
+      props.onSnap(s);
+      const days = s.cardSpend || [];
+      const t = ymd(now);
+      setSelected(days.some((d) => d.date === t) ? t : days[days.length - 1]?.date || t);
+    }).catch((e) => {
+      if (!cancel) setErr(String(e));
+    });
     return () => {
       cancel = true;
     };
-  }, [tab, ym.y, ym.m, snap?.cardMonth, snap?.cardSpend?.length]);
+  }, [tab, ym.y, ym.m, want, snap?.cardMonth, snap?.loggedIn]);
 
-  const spend = snap?.cardSpend || [];
+  const spend = ready ? snap?.cardSpend || [] : [];
   const maxSpend = Math.max(...spend.map((d) => d.spend), 1);
   const monthSpend = spend.reduce((a, d) => a + d.spend, 0);
   const todaySpend = spend.find((d) => d.date === ymd(now))?.spend || 0;
   const selectedDay: DaySpend | undefined = spend.find((d) => d.date === selected);
   const isCurrentMonth = ym.y === now.getFullYear() && ym.m === now.getMonth() + 1;
   const today = ymd(now);
+  const holding = !err && hold != null && hold.want === want && performance.now() < hold.until;
+  const showLoading = !err && (holding || !ready);
+  const revealed = ready && !showLoading;
+  const third = isCurrentMonth ? todaySpend : monthSpend / Math.max(spend.filter((d) => d.date <= today).length, 1);
 
-  async function shiftMonth(delta: number) {
+  function shiftMonth(delta: number) {
     let y = ym.y;
     let m = ym.m + delta;
     if (m < 1) { m = 12; y--; }
     if (m > 12) { m = 1; y++; }
     if (y > now.getFullYear() || (y === now.getFullYear() && m > now.getMonth() + 1)) return;
+    setErr("");
+    setHover(null);
     setYm({ y, m });
-    try {
-      const s = await api.loadMonth(y, m);
-      props.onSnap(s);
-      const days = s.cardSpend || [];
-      const t = ymd(now);
-      setSelected(days.find((d) => d.date === t)?.date || days[days.length - 1]?.date || t);
-    } catch (e) {
-      setErr(String(e));
-    }
+  }
+
+  if (!snap?.loggedIn) {
+    return (
+      <div className="stack">
+        <div className="row-between">
+          <h1 className="page-title">账单</h1>
+        </div>
+        <div className="empty">校园卡和网费需要登录。</div>
+        <Button appearance="primary" onClick={props.onRequestLogin}>去登录</Button>
+      </div>
+    );
   }
 
   return (
     <div className="stack">
       <div className="row-between">
         <h1 className="page-title">账单</h1>
-        <TabList selectedValue={tab} onTabSelect={(_, data) => props.onTab(data.value as "card" | "net")}>
+        <TabList className="bill-tabs" selectedValue={tab} onTabSelect={(_, data) => props.onTab(data.value as "card" | "net")}>
           <Tab value="card">校园卡</Tab>
           <Tab value="net">网费</Tab>
         </TabList>
       </div>
 
+      <div className="bill-switch">
+      <div key={tab} className={`bill-pane${pane.current.motion ? ` ${pane.current.motion}` : ""}`}>
       {tab === "net" ? <NetDoc /> : (
         <>
           <div className="row-between">
@@ -91,16 +186,14 @@ export function Bills(props: {
           </div>
           <div className="bill-metrics">
             <div><div className="k">余额</div><div className="v num">{snap?.card ? fmtMoney(snap.card.balance) + " 元" : "—"}</div></div>
-            <div><div className="k">{isCurrentMonth ? "本月" : `${ym.m}月`}</div><div className="v num">{fmtMoney(monthSpend)} 元</div></div>
+            <div><div className="k">{isCurrentMonth ? "本月" : `${ym.m}月`}</div><div className="v num">{revealed ? `${fmtMoney(monthSpend)} 元` : "-"}</div></div>
             <div>
               <div className="k">{isCurrentMonth ? "今日" : "日均"}</div>
-              <div className="v num">
-                {fmtMoney(isCurrentMonth ? todaySpend : monthSpend / Math.max(spend.filter((d) => d.date <= today).length, 1))} 元
-              </div>
+              <div className="v num">{revealed ? `${fmtMoney(third)} 元` : "-"}</div>
             </div>
           </div>
-          <div className="chart-block">
-            {hover && (() => {
+          <div className="chart-block" aria-busy={showLoading || undefined}>
+            {!showLoading && hover && (() => {
               const d = spend.find((x) => x.date === hover);
               if (!d) return null;
               const i = spend.findIndex((x) => x.date === hover);
@@ -126,7 +219,7 @@ export function Bills(props: {
               );
             })()}
             <div className="chart">
-              {spend.map((d) => {
+              {showLoading ? <WaveBars count={daysInMonth(ym.y, ym.m)} /> : spend.map((d) => {
                 const h = d.spend ? Math.max(4, Math.round((d.spend / maxSpend) * 120)) : 0;
                 const future = d.date > today;
                 const on = d.date === today || d.date === selected;
@@ -144,9 +237,11 @@ export function Bills(props: {
                 );
               })}
             </div>
-            <div className="xaxis"><span>1日</span><span>15日</span><span>{spend.length ? `${spend.length}日` : ""}</span></div>
+            <div className="xaxis"><span>1日</span><span>15日</span><span>{showLoading ? `${daysInMonth(ym.y, ym.m)}日` : spend.length ? `${spend.length}日` : ""}</span></div>
           </div>
-          {selectedDay && (
+          {showLoading ? (
+            <div className="bills"><LoadingCaption /></div>
+          ) : selectedDay ? (
             <>
               <div className="day-title">{selectedDay.date} · {selectedDay.count} 笔 · {fmtMoney(selectedDay.spend)} 元</div>
               <div className="bills">
@@ -165,10 +260,12 @@ export function Bills(props: {
                 ))}
               </div>
             </>
-          )}
+          ) : null}
           <div className="foot">{snap?.billsTruncated ? "本月可能不完整 · " : ""}只计消费，充值不进柱高{err ? ` · ${err}` : ""}</div>
         </>
       )}
+      </div>
+      </div>
     </div>
   );
 }

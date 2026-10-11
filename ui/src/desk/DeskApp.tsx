@@ -84,6 +84,8 @@ export function DeskApp() {
   const [updatePhase, setUpdatePhase] = useState<"idle" | "busy" | "fail">("idle");
   const [checkState, setCheckState] = useState<CheckState>("idle");
   const [updateHidden, setUpdateHidden] = useState(false);
+  const [shareOn, setShareOn] = useState(false);
+  const [shareJump, setShareJump] = useState(0);
   pageRef.current = page;
 
   async function runLook(manual: boolean) {
@@ -141,7 +143,7 @@ export function DeskApp() {
   const mode = resolveTheme(settings?.theme);
   const loggedIn = !!snap?.loggedIn;
   const offline = !!snap?.offline;
-  const showApp = !!snap && loggedIn;
+  const showApp = !!snap && (loggedIn || !!settings?.skipLogin);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", mode);
@@ -214,6 +216,9 @@ export function DeskApp() {
     const unsubs: Array<() => void> = [];
     listen<Snapshot>("snapshot-updated", (e) => {
       applySnap(e.payload);
+      if (e.payload.loggedIn) {
+        setSettings((prev) => (prev?.skipLogin ? { ...prev, skipLogin: false } : prev));
+      }
       setRefreshUi((u) => (u === "spin" ? "ok" : u));
     }).then((f) => unsubs.push(f));
     listen<AppSettings>("settings-updated", (e) => {
@@ -229,6 +234,10 @@ export function DeskApp() {
         setRefreshUi("idle");
         setErr(p.slice(5));
       }
+    }).then((f) => unsubs.push(f));
+    api.shareOffer().then((offer) => setShareOn(!!offer)).catch(() => undefined);
+    listen<boolean>("share-changed", (e) => {
+      setShareOn(!!e.payload);
     }).then((f) => unsubs.push(f));
     listen<LoginOutcome>("need-sms", (e) => {
       const out = e.payload;
@@ -269,8 +278,19 @@ export function DeskApp() {
     setPage(next);
   }
 
+  function requestLogin() {
+    if (!settings) return;
+    updateSettings({ ...settings, skipLogin: false });
+    setPage("home");
+  }
+
   async function doRefresh() {
     if (refreshUi === "spin") return;
+    if (!snap?.loggedIn) {
+      setErr("校园卡、网费、电费和课程需要登录。日程仍在这台电脑上。");
+      setRefreshUi("idle");
+      return;
+    }
     setRefreshUi("spin");
     setErr("");
     try {
@@ -353,6 +373,7 @@ export function DeskApp() {
         ) : showApp ? (
           <div className="desk-shell">
             <NavDrawer
+              className="desk-nav"
               open
               type="inline"
               selectedValue={page}
@@ -370,6 +391,18 @@ export function DeskApp() {
                   </NavItem>
                 ))}
               </NavDrawerBody>
+              {shareOn ? (
+                <button
+                  type="button"
+                  className="share-pill"
+                  onClick={() => {
+                    setShareJump((n) => n + 1);
+                    selectPage("toolbox");
+                  }}
+                >
+                  文件分享服务已启用
+                </button>
+              ) : null}
             </NavDrawer>
             <main className="desk-main">
               {updateVersion && !updateHidden ? (
@@ -403,6 +436,7 @@ export function DeskApp() {
                     onOpenSchedule={() => selectPage("schedule")}
                     onOpenEvent={openEvent}
                     onSyncCourses={doSyncCourses}
+                    onRequestLogin={requestLogin}
                   />
                 )}
                 {page === "schedule" && (
@@ -416,7 +450,7 @@ export function DeskApp() {
                   />
                 )}
                 {page === "toolbox" && settings && (
-                  <Toolbox settings={settings} setSettings={updateSettings} />
+                  <Toolbox settings={settings} setSettings={updateSettings} openShare={shareJump} />
                 )}
                 {page === "doors" && <Doors />}
                 {page === "bills" && (
@@ -426,6 +460,7 @@ export function DeskApp() {
                     tab={billTab}
                     onTab={setBillTab}
                     onSnap={(s) => setSnap(s)}
+                    onRequestLogin={requestLogin}
                   />
                 )}
                 {page === "settings" && settings && (
@@ -439,10 +474,17 @@ export function DeskApp() {
                     offline={offline}
                     onSync={doSyncCourses}
                     onPreviewRemind={() => { api.previewRemind().catch(() => undefined); }}
-                    onLogout={async () => {
-                      try { await api.logout(); } catch { /* ignore */ }
+                    loggedIn={loggedIn}
+                    onRequestLogin={requestLogin}
+                    onLogout={async (keepAgenda) => {
+                      const kept = keepAgenda ? snap?.agenda ?? [] : [];
+                      try {
+                        await api.logout(keepAgenda);
+                      } catch {
+                        return;
+                      }
                       if (!remember) setPass("");
-                      setSnap({ fetchedAt: "", network: "unknown", loggedIn: false, offline: false, agenda: [], errors: {} });
+                      setSnap({ fetchedAt: "", network: "unknown", loggedIn: false, offline: false, agenda: kept, errors: {} });
                       setStep("login");
                       setPage("home");
                     }}
@@ -479,7 +521,13 @@ export function DeskApp() {
                 setStep={setStep}
                 sms={sms}
                 setSms={setSms}
+                onSkip={() => {
+                  if (!settings) return;
+                  updateSettings({ ...settings, skipLogin: true });
+                  setPage("home");
+                }}
                 onLoggedIn={(username) => {
+                  setSettings((s) => (s ? { ...s, skipLogin: false } : s));
                   setSnap((s) =>
                     s
                       ? { ...s, loggedIn: true, offline: false, username: username || s.username, errors: { ...s.errors, auth: undefined } }

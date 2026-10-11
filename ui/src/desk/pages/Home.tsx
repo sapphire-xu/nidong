@@ -15,7 +15,7 @@ function MixBody({ row }: { row: MixRow }) {
   return (
     <>
       <div className="when">
-        <span className="num">{row.start}–{row.end}</span>
+        <span className="num">{row.end ? `${row.start}–${row.end}` : row.start}</span>
         {row.label ? <span className="when-label">{row.label}</span> : null}
       </div>
       <div className="cname">
@@ -32,8 +32,25 @@ function MixBody({ row }: { row: MixRow }) {
 function DayLists(props: {
   day: ReturnType<typeof deriveDay>;
   onOpenEvent: (item: Agenda | null) => void;
+  courses?: boolean;
 }) {
   const { day } = props;
+  if (props.courses === false) {
+    const seen = new Set<string>();
+    const events = [...day.todayMix, ...day.tomorrowMix].filter((r) => {
+      if (r.type !== "event" || seen.has(r.key)) return false;
+      seen.add(r.key);
+      return true;
+    });
+    if (!events.length) return <div className="empty">课程需要登录。日程可以在这里添加。</div>;
+    return (
+      <div className="mix">
+        {events.map((r) => (
+          <MixRowView key={r.key} row={r} onEvent={() => r.event && props.onOpenEvent(r.event)} />
+        ))}
+      </div>
+    );
+  }
   const revealTomorrow = day.todayDone || day.todayCourses.length === 0;
   const showTomorrow = revealTomorrow && day.tomorrowMix.length > 0;
   return (
@@ -114,6 +131,7 @@ export function Home(props: {
   onOpenSchedule: () => void;
   onOpenEvent: (item: Agenda | null) => void;
   onSyncCourses: () => void;
+  onRequestLogin: () => void;
 }) {
   const { snap, settings, now, clockOverridden, refreshUi, err, homeSpend, courseSync } = props;
   const day = deriveDay(snap, settings, now);
@@ -123,6 +141,9 @@ export function Home(props: {
   const netWarn = (snap?.net?.balance ?? 999) < (settings?.netWarn ?? 5);
   const elecCached = !!snap?.elec && !snap.elec?.unbound && snap.elec?.remainKwh != null;
   const elecSyncFail = !!snap?.errors.elec;
+  const elecHour = now.getHours();
+  const elecQuiet = elecHour >= 23 || elecHour < 6;
+  const elecShowCache = !!snap?.elec?.stale || (elecQuiet && elecSyncFail && elecCached);
   const elecWarn = elecCached && (snap?.elec?.remainKwh ?? 999) < (settings?.elecWarn ?? 10);
   const preview = homeSpend.length ? homeSpend : snap?.cardSpend || [];
   const previewMax = Math.max(...preview.map((d) => d.spend), 1);
@@ -165,9 +186,11 @@ export function Home(props: {
       ) : null}
 
       <div className="cards">
-        <Card className={cardWarn ? "warn-card" : undefined}>
-          <button type="button" className="card-hit" onClick={() => props.onOpenBills("card")}>
+        <Card className={!loggedIn ? undefined : cardWarn ? "warn-card" : undefined}>
+          <button type="button" className="card-hit" onClick={() => (loggedIn ? props.onOpenBills("card") : props.onRequestLogin())}>
             <div className="card-k">校园卡</div>
+            {loggedIn ? (
+              <>
             <div className="card-v num">{snap?.card ? fmtMoney(snap.card.balance) : "—"}</div>
             <div className={`card-u ${cardWarn ? "warn" : ""}`}>元{snap?.errors.card ? " · 同步失败" : ""}</div>
             <div className="mini">
@@ -176,11 +199,20 @@ export function Home(props: {
                 return <i key={d.date} className={d.date === today ? "today" : ""} style={{ height: h }} />;
               })}
             </div>
+              </>
+            ) : (
+              <>
+                <div className="card-v">登录后可用</div>
+                <div className="card-u">校园卡</div>
+              </>
+            )}
           </button>
         </Card>
-        <Card className={netWarn ? "warn-card" : undefined}>
-          <button type="button" className="card-hit" onClick={() => props.onOpenBills("net")}>
+        <Card className={!loggedIn ? undefined : netWarn ? "warn-card" : undefined}>
+          <button type="button" className="card-hit" onClick={() => (loggedIn ? props.onOpenBills("net") : props.onRequestLogin())}>
             <div className="card-k">网费</div>
+            {loggedIn ? (
+            <>
             <div className="card-v num">{snap?.net ? fmtMoney(snap.net.balance) : "—"}</div>
             <div className={`card-u ${netWarn ? "warn" : ""}`}>
               {snap?.net && snap.net.balance <= 0 ? "元 · 见底了" : "元"}
@@ -193,18 +225,30 @@ export function Home(props: {
                   : `已用 ${formatBytes(snap.net.monthBytes)}`
                 : ""}
             </div>
+            </>
+            ) : (
+              <>
+                <div className="card-v">登录后可用</div>
+                <div className="card-u">网费</div>
+              </>
+            )}
           </button>
         </Card>
-        <Card className={elecWarn ? "warn-card" : undefined}>
+        <Card className={!loggedIn ? undefined : elecWarn ? "warn-card" : undefined}>
           <div className="card-hit">
             <div className="card-k">电费</div>
-            {elecCached ? (
+            {!loggedIn ? (
+              <>
+                <div className="card-v">登录后可用</div>
+                <div className="card-u">电费</div>
+              </>
+            ) : elecCached ? (
               <>
                 <div className="card-v num">{fmtElec(snap?.elec?.remainKwh || 0)}</div>
-                <div className={`card-u ${elecWarn || elecSyncFail ? "warn" : ""}`}>
+                <div className={`card-u ${elecWarn || (elecSyncFail && !elecShowCache) ? "warn" : ""}`}>
                   度{elecWarn ? " · 偏低" : ""}
-                  {snap?.elec?.stale ? " · 缓存" : ""}
-                  {elecSyncFail ? " · 同步失败" : ""}
+                  {elecShowCache ? " · 缓存" : ""}
+                  {!elecShowCache && elecSyncFail ? " · 同步失败" : ""}
                 </div>
               </>
             ) : elecSyncFail ? (
@@ -235,7 +279,9 @@ export function Home(props: {
         </div>
       </div>
 
-      {!snap?.semester && snap?.errors.course ? (
+      {!loggedIn ? (
+        <DayLists day={day} courses={false} onOpenEvent={props.onOpenEvent} />
+      ) : !snap?.semester && snap?.errors.course ? (
         <div>
           <p className="hint warn">
             {snap.network === "offcampus" || /校外|超时/.test(snap.errors.course)

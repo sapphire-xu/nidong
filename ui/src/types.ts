@@ -59,6 +59,28 @@ export type Agenda = {
   end: string;
   remind: boolean;
   remindMinutes?: number;
+  location?: string;
+  /** 1、2、15、3、4、5、6、7。 */
+  remindCode?: string;
+  /** 代码 7：前一天的 HH:MM。 */
+  setTime?: string;
+  /** 重复只存这一条。 */
+  isRepet?: boolean;
+  repetRule?: RepetRule;
+  /** 仅展示：这一次发生的起止。不写入 agenda.json。 */
+  occStart?: string;
+  occEnd?: string;
+};
+
+export type RepetFreq = "DAILY" | "WEEKLY";
+
+export type RepetRule = {
+  freq: RepetFreq;
+  byday?: string[];
+  endmode: "DATE" | "NUMBER";
+  /** `DATE` 时的 `YYYY-MM-DD`。 */
+  time?: string;
+  num?: number;
 };
 
 export type Course = {
@@ -112,6 +134,8 @@ export type AppSettings = {
   campusWifiMode?: "off" | "offline" | "boot" | "hotspot" | "manual";
   campusWifiSsid?: string;
   campusHotspotSsid?: string;
+  skipLogin?: boolean;
+  shareHintDismissed?: boolean;
 };
 
 export type SavedCreds = {

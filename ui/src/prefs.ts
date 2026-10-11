@@ -15,6 +15,8 @@ export function withSettingDefaults(s: AppSettings): AppSettings {
     campusWifiMode: mode,
     campusWifiSsid: s.campusWifiSsid || "",
     campusHotspotSsid: s.campusHotspotSsid || "",
+    skipLogin: s.skipLogin === true,
+    shareHintDismissed: s.shareHintDismissed === true,
   };
 }
 

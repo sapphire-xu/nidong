@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { Button } from "@fluentui/react-components";
+import { getVersion } from "@tauri-apps/api/app";
 import { api } from "../../api";
 
 export function About(props: {
@@ -9,6 +11,18 @@ export function About(props: {
   onCheck: () => void;
   onInstall: () => void;
 }) {
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    let alive = true;
+    getVersion()
+      .then((v) => {
+        if (alive && v.trim()) setVersion(v.trim());
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
   const status = props.updateVersion
     ? `有新版本 ${props.updateVersion}`
     : props.checkState === "checking"
@@ -44,7 +58,7 @@ export function About(props: {
       </dl>
       <div className="about-update">
         <div className="about-update-copy">
-          <div className="about-ver">v2.1.0</div>
+          {version ? <div className="about-ver">v{version}</div> : null}
           <p className="hint">{status}</p>
           {props.updateFailed ? <p className="hint warn">更新没有完成，稍后再试。</p> : null}
         </div>

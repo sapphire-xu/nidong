@@ -20,7 +20,7 @@ export const api = {
   syncCourses: () => invoke<Snapshot>("sync_courses"),
   saveAgenda: (item: Agenda) => invoke<Snapshot>("save_agenda", { item }),
   deleteAgenda: (id: string) => invoke<Snapshot>("delete_agenda", { id }),
-  logout: () => invoke<void>("logout"),
+  logout: (keepAgenda: boolean) => invoke<void>("logout", { keepAgenda }),
   raiseTopmost: () => invoke<void>("raise_topmost"),
   setHoverWatch: (watch: { enabled: boolean; x: number; y: number; width: number; height: number }) =>
     invoke<void>("set_hover_watch", { watch }),
@@ -31,4 +31,25 @@ export const api = {
   previewRemind: () => invoke<void>("preview_remind"),
   currentWifi: () => invoke<string>("current_wifi"),
   openFeedback: () => invoke<void>("open_feedback"),
+  shareDescribe: (paths: string[]) => invoke<ShareDescribe>("share_describe", { paths }),
+  shareStart: (paths: string[]) => invoke<ShareOffer>("share_start", { paths }),
+  shareStop: () => invoke<void>("share_stop"),
+  shareOffer: () => invoke<ShareOffer | null>("share_offer"),
+  shareRevise: (paths: string[]) => invoke<ShareOffer>("share_revise", { paths }),
+  shareOnCampus: () => invoke<boolean>("share_on_campus"),
+};
+
+export type ShareFile = { id?: number; path: string; name: string; bytes: number };
+
+export type ShareDescribe = { files: ShareFile[]; note?: string | null };
+
+export type ShareOffer = {
+  url: string;
+  code: string;
+  host: string;
+  port: number;
+  files: ShareFile[];
+  unlocks: number;
+  activeDownloads: number;
+  lastPeer?: string | null;
 };

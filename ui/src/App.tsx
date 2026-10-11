@@ -54,6 +54,7 @@ export default function App() {
   const openingDeskRef = useRef(false);
   const todayCoursesRef = useRef<Course[]>([]);
   const campusHintRef = useRef("");
+  const silentLoginRef = useRef(false);
   const preHintHidden = useRef(false);
   const hintTimer = useRef(0);
   const hideIslandRef = useRef<() => void>(() => undefined);
@@ -65,6 +66,7 @@ export default function App() {
   hoveredRef.current = hovered;
   autoHideRef.current = !!settings?.autoHide;
   autoHideHoverRef.current = !!settings?.autoHideHover;
+  silentLoginRef.current = silentLogin;
 
   const day = deriveDay(snap, settings, now);
   todayCoursesRef.current = day.todayCourses;
@@ -87,20 +89,27 @@ export default function App() {
   }, []);
 
   const hideIsland = useCallback(async () => {
-    if (!autoHideRef.current || remindRef.current || campusHintRef.current || hiddenRef.current) return;
+    if (!autoHideRef.current || remindRef.current || campusHintRef.current || silentLoginRef.current || hiddenRef.current) return;
     const gen = ++hideGen.current;
     setStowing(true);
     await sleep(320);
-    if (hideGen.current !== gen || remindRef.current || gameFsRef.current) {
-      setStowing(false);
+    // 折叠途中如果来了校园网提示或同步文案，reveal 会把这一代作废。
+    // 位置查询也是 await。作废之后不能再 hide()，否则动画被掐掉，窗口直接没了。
+    const cancelled = () =>
+      hideGen.current !== gen || !!remindRef.current || gameFsRef.current || !!campusHintRef.current || silentLoginRef.current;
+    if (cancelled()) {
+      if (hideGen.current === gen) setStowing(false);
       return;
     }
-    setHidden(true);
     const w = getCurrentWindow();
     try {
       if (autoHideHoverRef.current) {
         const pos = await w.outerPosition();
         const size = await w.outerSize();
+        if (cancelled()) {
+          if (hideGen.current === gen) setStowing(false);
+          return;
+        }
         const pad = 24;
         await api.setHoverWatch({
           enabled: true,
@@ -112,9 +121,31 @@ export default function App() {
       } else {
         await stopHoverWatch();
       }
+      if (cancelled()) {
+        if (hideGen.current === gen) setStowing(false);
+        return;
+      }
+      setHidden(true);
       await w.hide();
+      // hide() 返回时，提示可能已经把折叠类名清掉。这时再留着隐藏，岛就是直接没了。
+      if (cancelled()) {
+        setHidden(false);
+        if (hideGen.current === gen) setStowing(false);
+        try {
+          await api.raiseTopmost();
+        } catch {
+          try {
+            await getCurrentWindow().show();
+          } catch {
+            /* ignore */
+          }
+        }
+      }
     } catch {
-      /* ignore */
+      if (hideGen.current === gen) {
+        setStowing(false);
+        setHidden(false);
+      }
     }
   }, []);
 
@@ -302,12 +333,12 @@ export default function App() {
 
   useEffect(() => {
     window.clearTimeout(hideTimer.current);
-    if (!settings?.autoHide || hidden || stowing || remind || hovered || campusHint) return;
+    if (!settings?.autoHide || hidden || stowing || remind || hovered || campusHint || silentLogin) return;
     hideTimer.current = window.setTimeout(() => {
       hideIsland();
     }, 3000);
     return () => window.clearTimeout(hideTimer.current);
-  }, [hidden, stowing, remind, hovered, campusHint, settings?.autoHide, hideIsland]);
+  }, [hidden, stowing, remind, hovered, campusHint, silentLogin, settings?.autoHide, hideIsland]);
 
   useEffect(() => {
     if (!remind) return;
@@ -334,11 +365,11 @@ export default function App() {
     }
     const ev = upcomingAgenda(snap?.agenda || [], now);
     if (!ev) return;
-    const id = `event-${ev.id}-${ev.start}`;
+    const id = `event-${ev.item.id}-${ev.start}`;
     if (remindedId.current === id) return;
     remindedId.current = id;
     startRemindRef.current({
-      name: ev.name,
+      name: ev.item.name,
       place: "",
       start: ev.start.slice(11, 16),
       end: ev.end.slice(11, 16),
@@ -471,14 +502,14 @@ export default function App() {
       ? refreshUi === "spin"
         ? "同步中…"
         : "登录中…"
-      : !loggedIn
+      : !loggedIn && !settings?.skipLogin
         ? "登录泥洞"
         : day.collapsed?.mid || "今天没课";
   const collapsedAux = remind
     ? remind.start
     : campusHint
       ? ""
-      : !loggedIn
+      : !loggedIn && !settings?.skipLogin
       ? "→"
       : day.collapsed?.aux
         ? day.collapsed.aux

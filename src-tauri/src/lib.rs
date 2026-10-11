@@ -11,6 +11,8 @@ mod models;
 mod periods;
 mod util;
 mod webvpn;
+mod desk_drop;
+mod share;
 mod wlan;
 
 use client::{
@@ -68,6 +70,55 @@ struct TrayBalances {
 /// 23:00–06:00 电费系统经常连不上。这段时间失败就留缓存，不标同步失败。
 fn elec_night(hour: u32) -> bool {
     hour >= 23 || hour < 6
+}
+
+fn normalize_room(raw: &str) -> String {
+    raw.trim().replace(['-', ' '], "")
+}
+
+/// 失败时怎么处理电费缓存。`quiet` 必须用处理结果那一刻的钟，不要用刷新开始时的钟。
+fn settle_elec(
+    elec: &mut Option<ElecInfo>,
+    error: &mut Option<String>,
+    want_room: &str,
+    quiet: bool,
+    err: &str,
+) {
+    let want = normalize_room(want_room);
+    let cached = elec
+        .as_ref()
+        .and_then(|old| old.room_no.as_deref())
+        .map(normalize_room)
+        .unwrap_or_default();
+    let room_changed = !cached.is_empty() && !want.is_empty() && cached != want;
+    let usable = elec
+        .as_ref()
+        .is_some_and(|old| !old.unbound && old.remain_kwh.is_some())
+        && !room_changed;
+    if room_changed {
+        *elec = None;
+    }
+    if quiet && usable {
+        if let Some(old) = elec.as_mut() {
+            old.stale = true;
+            if old
+                .room_no
+                .as_deref()
+                .map(normalize_room)
+                .unwrap_or_default()
+                .is_empty()
+                && !want.is_empty()
+            {
+                old.room_no = Some(want);
+            }
+        }
+        *error = None;
+    } else {
+        if let Some(old) = elec.as_mut() {
+            old.stale = false;
+        }
+        *error = Some(err.to_string());
+    }
 }
 
 async fn ensure_client(state: &AppState) -> Result<Arc<NeuClient>> {
@@ -290,10 +341,12 @@ fn place_window(win: &WebviewWindow, settings: &AppSettings) {
     }
 }
 
-fn wipe_local_data(dir: &PathBuf) {
+fn wipe_local_data(dir: &PathBuf, keep_agenda: bool) {
     let _ = fs::remove_file(dir.join("cookies.json"));
     let _ = fs::remove_file(dir.join("snapshot.json"));
-    let _ = fs::remove_file(dir.join("agenda.json"));
+    if !keep_agenda {
+        let _ = fs::remove_file(dir.join("agenda.json"));
+    }
     clear_session_open(dir);
     if let Ok(rd) = fs::read_dir(dir) {
         for e in rd.flatten() {
@@ -792,33 +845,15 @@ async fn refresh_inner(state: &AppState, retry_courses: bool) -> Result<Snapshot
             snap.errors.elec = None;
         }
         Err(e) => {
-            let want = settings.room_no.trim().replace(['-', ' '], "");
-            let keep = snap.elec.as_ref().is_some_and(|old| {
-                !old.unbound
-                    && old.remain_kwh.is_some()
-                    && old.room_no.as_deref() == Some(want.as_str())
-            });
-            if !keep {
-                if snap
-                    .elec
-                    .as_ref()
-                    .is_some_and(|old| old.room_no.as_deref() != Some(want.as_str()))
-                {
-                    snap.elec = None;
-                }
-            }
-            // 23:00–06:00 连不上就显示上次度数，不写成同步失败。
-            if elec_quiet && keep {
-                if let Some(old) = snap.elec.as_mut() {
-                    old.stale = true;
-                }
-                snap.errors.elec = None;
-            } else {
-                if let Some(old) = snap.elec.as_mut() {
-                    old.stale = false;
-                }
-                snap.errors.elec = Some(e.to_string());
-            }
+            // 课程可能要拉很久。用结束时的钟，避免 22:59 开始、过了 23:00 仍标同步失败。
+            let quiet_now = elec_night(crate::clock::now().hour());
+            settle_elec(
+                &mut snap.elec,
+                &mut snap.errors.elec,
+                &settings.room_no,
+                quiet_now,
+                &e.to_string(),
+            );
         }
     }
     match bills {
@@ -957,6 +992,8 @@ fn open_desk_on_ui(app: &AppHandle) -> Result<()> {
     }
     let _ = desk.unminimize();
     desk.show().map_err(|e| e.to_string())?;
+    // 窗口配置里先隐藏。wry 创建时登记的拖放接不住后来出现的 WebView 子窗口。
+    crate::desk_drop::arm(app);
     // 在 UI 线程里只调用 SetForegroundWindow。set_focus 失败时会注入 Alt，
     // 岛还是前台时这个 Alt 会打开系统标题栏，连点会把消息循环卡死。
     crate::hotkey::focus_without_menu(&desk);
@@ -1098,7 +1135,8 @@ fn set_hover_watch(watch: HoverWatch) {
 }
 
 #[tauri::command]
-fn save_agenda(app: AppHandle, state: State<AppState>, item: AgendaItem) -> Result<Snapshot> {
+async fn save_agenda(app: AppHandle, state: State<'_, AppState>, item: AgendaItem) -> Result<Snapshot> {
+    let _gate = state.refresh_gate.lock().await;
     let items = agenda::upsert(&state.data_dir, item)?;
     let mut snap = state.snapshot.lock().unwrap();
     snap.agenda = items;
@@ -1109,7 +1147,8 @@ fn save_agenda(app: AppHandle, state: State<AppState>, item: AgendaItem) -> Resu
 }
 
 #[tauri::command]
-fn delete_agenda(app: AppHandle, state: State<AppState>, id: String) -> Result<Snapshot> {
+async fn delete_agenda(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<Snapshot> {
+    let _gate = state.refresh_gate.lock().await;
     let items = agenda::delete(&state.data_dir, &id)?;
     let mut snap = state.snapshot.lock().unwrap();
     snap.agenda = items;
@@ -1120,7 +1159,7 @@ fn delete_agenda(app: AppHandle, state: State<AppState>, id: String) -> Result<S
 }
 
 #[tauri::command]
-async fn logout(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+async fn logout(app: AppHandle, state: State<'_, AppState>, keep_agenda: bool) -> Result<()> {
     state.epoch.fetch_add(1, Ordering::SeqCst);
     let remember = state.settings.lock().unwrap().remember_password;
     let user = {
@@ -1132,7 +1171,11 @@ async fn logout(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     *state.client.lock().await = None;
     *state.snapshot.lock().unwrap() = Snapshot::default();
     *state.pending_login.lock().unwrap() = None;
-    wipe_local_data(&state.data_dir);
+    wipe_local_data(&state.data_dir, keep_agenda);
+    if keep_agenda {
+        let mut snap = state.snapshot.lock().unwrap();
+        attach_local(&state.data_dir, &mut snap);
+    }
     if !remember {
         if let Some(u) = user {
             keyring_delete(&u);
@@ -1308,6 +1351,7 @@ pub fn run() {
         reveal_running_instance(app);
     }));
     builder = builder.plugin(tauri_plugin_opener::init());
+    builder = builder.plugin(tauri_plugin_dialog::init());
     builder = builder.plugin(tauri_plugin_process::init());
     builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder
@@ -1336,13 +1380,14 @@ pub fn run() {
                 }
             }
             migrate_session_flag(&data_dir, &snapshot);
-            snapshot.agenda = agenda::load(&data_dir);
+            attach_local(&data_dir, &mut snapshot);
             if session_is_open(&data_dir) {
                 snapshot.logged_in = true;
                 snapshot.errors.auth = None;
             } else {
                 snapshot.logged_in = false;
             }
+            app.manage(share::ShareHub::default());
             app.manage(AppState {
                 client: AsyncMutex::new(client),
                 epoch: AtomicU64::new(0),
@@ -1549,7 +1594,13 @@ pub fn run() {
             set_bills_open,
             save_agenda,
             delete_agenda,
-            logout
+            logout,
+            share::share_describe,
+            share::share_start,
+            share::share_stop,
+            share::share_offer,
+            share::share_revise,
+            share::share_on_campus
         ])
         .run(tauri::generate_context!())
         .expect("泥洞启动失败");
@@ -1557,7 +1608,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::elec_night;
+    use super::{elec_night, settle_elec, ElecInfo};
 
     #[test]
     fn elec_quiet_hours_are_23_to_6() {
@@ -1567,5 +1618,59 @@ mod tests {
         assert!(!elec_night(6));
         assert!(!elec_night(11));
         assert!(!elec_night(22));
+    }
+
+    fn reading(room: Option<&str>, kwh: f64) -> ElecInfo {
+        ElecInfo {
+            unbound: false,
+            remain_kwh: Some(kwh),
+            room_no: room.map(str::to_string),
+            room_label: None,
+            last_read_at: None,
+            stale: false,
+        }
+    }
+
+    #[test]
+    fn night_failure_keeps_the_reading_and_drops_the_error() {
+        let mut elec = Some(reading(Some("351-0409"), 182.0));
+        let mut err = Some("旧的同步失败".into());
+        settle_elec(&mut elec, &mut err, "3510409", true, "同步超时，请再刷新一次。");
+        let kept = elec.expect("cache");
+        assert_eq!(kept.remain_kwh, Some(182.0));
+        assert!(kept.stale);
+        assert!(err.is_none());
+    }
+
+    #[test]
+    fn night_failure_keeps_a_reading_that_never_stored_its_room() {
+        let mut elec = Some(reading(None, 12.5));
+        let mut err = None;
+        settle_elec(&mut elec, &mut err, "3510409", true, "电费系统维护");
+        let kept = elec.expect("legacy cache");
+        assert_eq!(kept.remain_kwh, Some(12.5));
+        assert!(kept.stale);
+        assert_eq!(kept.room_no.as_deref(), Some("3510409"));
+        assert!(err.is_none());
+    }
+
+    #[test]
+    fn day_failure_keeps_the_number_but_marks_sync_failed() {
+        let mut elec = Some(reading(Some("3510409"), 40.0));
+        let mut err = None;
+        settle_elec(&mut elec, &mut err, "3510409", false, "查电费失败");
+        let kept = elec.expect("day cache");
+        assert_eq!(kept.remain_kwh, Some(40.0));
+        assert!(!kept.stale);
+        assert_eq!(err.as_deref(), Some("查电费失败"));
+    }
+
+    #[test]
+    fn a_different_room_drops_the_old_reading() {
+        let mut elec = Some(reading(Some("3510409"), 40.0));
+        let mut err = None;
+        settle_elec(&mut elec, &mut err, "3520101", true, "查电费失败");
+        assert!(elec.is_none());
+        assert!(err.is_some());
     }
 }

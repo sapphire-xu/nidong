@@ -71,11 +71,13 @@ export function clipToAxis(startMin: number, endMin: number) {
 
 /** 日程落在某一天上的分钟范围。跨天按天切开。不碰这一天则返回 null。 */
 export function agendaDayMinutes(a: Agenda, ymd: string): { startMin: number; endMin: number } | null {
-  const start = parseAgenda(a.start);
-  const end = parseAgenda(a.end);
+  const startStamp = a.occStart || a.start;
+  const endStamp = a.occEnd || a.end;
+  const start = parseAgenda(startStamp);
+  const end = parseAgenda(endStamp);
   if (!start || !end || end.getTime() <= start.getTime()) return null;
-  const startKey = (a.start || "").slice(0, 10);
-  const endKey = (a.end || "").slice(0, 10);
+  const startKey = (startStamp || "").slice(0, 10);
+  const endKey = (endStamp || "").slice(0, 10);
   if (!startKey || !endKey || ymd < startKey || ymd > endKey) return null;
   const startMin = ymd === startKey ? start.getHours() * 60 + start.getMinutes() : 0;
   const endMin = ymd === endKey ? end.getHours() * 60 + end.getMinutes() : 24 * 60;

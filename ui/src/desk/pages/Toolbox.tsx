@@ -1,8 +1,9 @@
 import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Dropdown, Field, Input, Option } from "@fluentui/react-components";
-import { BookOpen20Regular, Clock20Regular, Library20Regular, Wifi120Regular } from "@fluentui/react-icons";
-import { useState, type ReactNode } from "react";
+import { BookOpen20Regular, Clock20Regular, Share20Regular, Wifi120Regular } from "@fluentui/react-icons";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../../api";
 import type { AppSettings } from "../../types";
+import { SharePanel } from "./Share";
 
 const MODES: { value: NonNullable<AppSettings["campusWifiMode"]>; text: string }[] = [
   { value: "off", text: "关闭" },
@@ -27,11 +28,27 @@ function isCampusNet(name: string, configured: string) {
 const LATER: { icon: ReactNode }[] = [
   { icon: <Clock20Regular /> },
   { icon: <BookOpen20Regular /> },
-  { icon: <Library20Regular /> },
 ];
 
-export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSettings) => void }) {
-  const { settings, setSettings } = props;
+export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSettings) => void; openShare?: number }) {
+  const { settings, setSettings, openShare } = props;
+  const [page, setPage] = useState<"hub" | "campus" | "share">(openShare ? "share" : "hub");
+  const [motion, setMotion] = useState<"idle" | "back">("idle");
+  const sharePanelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!openShare) return;
+    setMotion("idle");
+    setPage("share");
+    const el = sharePanelRef.current;
+    if (!el) return;
+    el.classList.remove("settings-sub-content");
+    void el.offsetWidth;
+    el.classList.add("settings-sub-content");
+  }, [openShare]);
+  const openPage = (next: "hub" | "campus" | "share") => {
+    setMotion(next === "hub" && page !== "hub" ? "back" : "idle");
+    setPage(next);
+  };
   const mode = settings.campusWifiMode || "off";
   const current = MODES.find((m) => m.value === mode) || MODES[0];
   const set = (patch: Partial<AppSettings>) => setSettings({ ...settings, ...patch });
@@ -61,22 +78,43 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
   return (
     <div className="stack">
       <div className="row-between">
-        <h1 className="page-title">工具箱</h1>
+        {page === "hub" ? (
+          <h1 className="page-title">工具箱</h1>
+        ) : (
+          <div className="settings-breadcrumb">
+            <button type="button" className="settings-breadcrumb-link" onClick={() => openPage("hub")}>工具箱</button>
+            <span aria-hidden="true">›</span>
+            <h1 className="page-title">{page === "campus" ? "校园网自动登录" : "免流文件互传"}</h1>
+          </div>
+        )}
       </div>
-      <div className="tool-grid">
-        <button type="button" className="tool-tile on" aria-pressed="true">
-          <span className="tool-ico" aria-hidden="true"><Wifi120Regular /></span>
-          <span className="tool-name">校园网自动登录</span>
-        </button>
-        {LATER.map((item, i) => (
-          <button key={i} type="button" className="tool-tile is-wait" disabled>
-            <span className="tool-ico" aria-hidden="true">{item.icon}</span>
-            <span className="tool-name">敬请期待</span>
+      {page === "hub" ? (
+        <div className={`tool-grid${motion === "back" ? " settings-hub-content" : ""}`}>
+          <button type="button" className="tool-tile on" onClick={() => openPage("campus")}>
+            <span className="tool-ico" aria-hidden="true"><Wifi120Regular /></span>
+            <span className="tool-name">校园网自动登录</span>
           </button>
-        ))}
-      </div>
-      <div className="tool-panel">
-        <Field label="校园网自动登录">
+          <button type="button" className="tool-tile on" onClick={() => openPage("share")}>
+            <span className="tool-ico" aria-hidden="true"><Share20Regular /></span>
+            <span className="tool-name">免流文件互传</span>
+          </button>
+          {LATER.map((item, i) => (
+            <button key={i} type="button" className="tool-tile is-wait" disabled>
+              <span className="tool-ico" aria-hidden="true">{item.icon}</span>
+              <span className="tool-name">敬请期待</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {page === "share" ? (
+        <div ref={sharePanelRef} className="tool-panel settings-sub-content">
+          <SharePanel settings={settings} onSettings={set} />
+        </div>
+      ) : null}
+      {page === "campus" ? (
+      <>
+      <div className="tool-panel settings-sub-content">
+        <Field label="登录规则设置">
           <Dropdown
             className="tool-select"
             listbox={{ className: "tool-select-list" }}
@@ -158,6 +196,8 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
           </DialogBody>
         </DialogSurface>
       </Dialog>
+      </>
+      ) : null}
     </div>
   );
 }

@@ -37,6 +37,30 @@ pub struct Snapshot {
     pub errors: SnapshotErrors,
 }
 
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
+/// 重复规则。`freq` 只接受 `DAILY` 或 `WEEKLY`。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepetRule {
+    pub freq: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub byday: Vec<String>,
+    /// `DATE` 或 `NUMBER`
+    pub endmode: String,
+    /// `DATE` 时的本地 `YYYY-MM-DD`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<String>,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub num: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgendaItem {
@@ -51,6 +75,19 @@ pub struct AgendaItem {
     pub remind: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remind_minutes: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    /// 提醒代码：1、2、15、3、4、5、6、7。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remind_code: Option<String>,
+    /// 代码 7：前一天的 HH:MM。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_time: Option<String>,
+    /// 重复只存这一条，界面按 `repet_rule` 展开。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_repet: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repet_rule: Option<RepetRule>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,6 +253,12 @@ pub struct AppSettings {
     /// 模式 hotspot：离开这个网络后才去连校园网。
     #[serde(default)]
     pub campus_hotspot_ssid: String,
+    /// 跳过登录进窗口。卡、网、电、课仍不可用。
+    #[serde(default)]
+    pub skip_login: bool,
+    /// 免流文件互传的说明勾过不再提示。
+    #[serde(default)]
+    pub share_hint_dismissed: bool,
 }
 
 impl Default for AppSettings {
@@ -242,6 +285,8 @@ impl Default for AppSettings {
             campus_wifi_mode: String::new(),
             campus_wifi_ssid: String::new(),
             campus_hotspot_ssid: String::new(),
+            skip_login: false,
+            share_hint_dismissed: false,
         }
     }
 }

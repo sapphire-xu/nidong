@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode } from "react";
 import {
   BookOpen20Regular,
   Building20Regular,
+  Code20Regular,
   Calculator20Regular,
   HatGraduation20Regular,
   Library20Regular,
@@ -27,6 +28,7 @@ const SCHOOL: Door[] = [
   { id: "ipgw", name: "校园网网关", tag: "仅校园网", url: "https://ipgw.neu.edu.cn/", policy: "campus-only", icon: <Wifi120Regular /> },
   { id: "mail", name: "校园邮箱", tag: "随网络", url: "https://mails.neu.edu.cn/", policy: "intranet", icon: <Mail20Regular /> },
   { id: "jwxt", name: "教务系统", tag: "随网络", url: "https://jwxt.neu.edu.cn/jwapp/sys/homeapp/index.do", policy: "intranet", icon: <HatGraduation20Regular /> },
+  { id: "oj", name: "学校 OJ", tag: "随网络", url: "http://oj.neu.edu.cn", policy: "intranet", icon: <Code20Regular /> },
   { id: "cnki", name: "知网", tag: "校内渠道", url: "https://www.cnki.net/", policy: "intranet", icon: <Library20Regular /> },
   { id: "portal", name: "一号通门户", tag: "随网络", url: "https://portal.neu.edu.cn/tp_up/", policy: "intranet", icon: <Building20Regular /> },
 ];

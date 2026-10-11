@@ -21,6 +21,7 @@ export function Login(props: {
   sms: Sms;
   setSms: (v: Sms | ((s: Sms) => Sms)) => void;
   onLoggedIn: (username?: string) => void;
+  onSkip: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -247,7 +248,9 @@ export function Login(props: {
         <Switch label="记住密码" checked={props.remember} onChange={(_, d) => patchRemember(d.checked)} />
         <Switch label="自动登录" disabled={!props.remember} checked={props.autoLogin && props.remember} onChange={(_, d) => patchAuto(d.checked)} />
         <Button appearance="primary" disabled={busy} onClick={doLogin}>{busy ? "登录中…" : "进入泥洞"}</Button>
+        <Button appearance="subtle" disabled={busy} onClick={props.onSkip}>跳过登录</Button>
         {err ? <p className="hint warn">{err}</p> : null}
+        <p className="hint">跳过后可以使用工具箱、日程、任意门和设置。校园卡、网费、电费和课程需要登录。</p>
         <p className="hint">勾选后密码存进这台电脑的系统凭据，下次打开会自动填入。关掉「记住密码」会删掉已存的密码。退出登录不会清。</p>
       </div>
     </div>

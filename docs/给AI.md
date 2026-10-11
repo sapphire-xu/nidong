@@ -2,10 +2,7 @@
 
 读这份再改代码。学校接口细节只在 [开发文档.md](开发文档.md)；颜色、尺寸、文案气质只在 [视觉设计.md](视觉设计.md)。不要把那两份再抄一遍到这里。
 
-和代码冲突时，以代码和本文为准。下面两份不要当现行规格：
-
-- [界面改造计划.md](界面改造计划.md)：2026-09-26 的双窗口改造已经做完
-- [prototype/](prototype/index.html)：旧的「岛向下展开」，只留着对照
+和代码冲突时，以代码和本文为准。[prototype/](prototype/index.html) 是旧的展开岛，不要当现行规格。界面改造计划已删。
 
 ## 搜代码之前先看这张表
 
@@ -20,16 +17,16 @@
 | 岛上有齿轮 | 设置在窗口左侧。表单在 `ui/src/Settings.tsx` |
 | 课表不参与定时刷新、不每天打教务 | 每天自动打一次教务，见「数据流」 |
 | 0:00–6:00 不查电费 | 那是校园网免费时段（账单页文案）。电费是 23:00–6:00 仍查，失败留缓存 |
-| 默认房间码 `3510409` | 那是 2026-09-08 的实测例子。`AppSettings.room_no` 默认空字符串 |
+| 默认房间码写成某一次实测的宿舍 | `AppSettings.room_no` 默认空字符串 |
 | 按 `prototype/index.html` 换皮 | 窗口是 Fluent。原型不要当视觉源 |
 
 ## 这是什么
 
-东北大学私人桌面看板。贴顶的一条 40px 岛负责下一节课、倒计时和余额警告。点岛打开带系统标题栏的 `desk` 窗口：主页、日程、账单、工具箱、任意门、设置、关于。未登录时窗口里先是登录。
+东北大学私人桌面看板。贴顶的一条 40px 岛负责下一节课、倒计时和余额警告。点岛打开带系统标题栏的 `desk` 窗口：主页、日程、账单、工具箱、任意门、设置、关于。未登录且没有点过「跳过登录」时，窗口里先是登录。
 
-产品名是「泥洞」（东大戏称），开源仓库 `nidong`（https://github.com/sapphire-xu/nidong）。包 id：`edu.neu.nidong`。不是学校官方应用。不适用于秦皇岛分校。
+产品名是「泥洞」（东大戏称），开源仓库 `nidong`（https://github.com/sapphire-xu/nidong）。包 id：`edu.neu.nidong`。不是学校官方应用。不适用于秦皇岛分校。Windows 防火墙提示里的发行者是版本资源的 CompanyName。没写 `bundle.publisher` 时 Tauri 取包 id 第二段，`edu.neu.nidong` 会显示成 neu。`bundle.publisher` 固定为 `sapphire_fic`。
 
-只跑在用户自己的电脑上。密码进 OS 凭据管理，cookie / 课表 / 账单 / 日程缓存在 `%APPDATA%\edu.neu.nidong`。不要把账号送到任何自建服务器。没要求发布就不要改版本号（当前 2.1.0）。
+只跑在用户自己的电脑上。密码进 OS 凭据管理，cookie / 课表 / 账单 / 日程缓存在 `%APPDATA%\edu.neu.nidong`。不要把账号送到任何自建服务器。没要求发布就不要改版本号。
 
 ## 技术栈（当前）
 
@@ -52,7 +49,8 @@ nidong/
       pages/Settings.tsx   设置页外壳，内容转给 SettingsPanel
       pages/Doors.tsx      任意门
       pages/Home.tsx       主页
-      pages/Toolbox.tsx    工具箱。校园网自动登录在这一页
+      pages/Toolbox.tsx    工具箱。校园网自动登录、免流文件互传
+      pages/Share.tsx      免流文件互传：本机网页、口令、拖放和添加文件
       updateCheck.ts      向 Gitee 检查新版本，失败只返回 failed
     Settings.tsx     设置表单 SettingsPanel：六类；退出登录在底部
     EventForm.tsx    添加/编辑日程，Fluent Dialog，日期是年/月/日三格
@@ -118,11 +116,11 @@ nidong/
 | 上课提醒 | 岛上 40px 置顶约 10 秒。点这下岛会打开窗口 |
 | 独占全屏 | 只藏岛。`desk` 保持原样 |
 
-未登录时 `desk` 只显示登录，短信验证是登录的下一步，不进导航。离线且上次没退出：直接进主页，信息条写「离线状态」。在线但会话失效：进登录。
+未登录且 `skipLogin` 为假时，`desk` 只显示登录，短信验证是登录的下一步，不进导航。点过「跳过登录」则进入导航，但卡、网、电、课、账单不请求。离线且上次没退出：直接进主页，信息条写「离线状态」。在线但会话失效、且没有跳过：进登录。
 
 `save_settings` 成功后向两个窗口发 `settings-updated`。日程的增删和手动刷新会发 `snapshot-updated`，岛上的提醒才看得到新日程。
 
-自动隐藏：设置 → 面板行为。字段 `autoHideHover` 还在，文案是「悬停唤出」。上课提醒弹出时会把岛喊回来，10 秒后若原先是隐藏的，再藏回去。
+自动隐藏：设置 → 面板行为。字段 `autoHideHover` 还在，文案是「悬停唤出」。收起先把岛向上折 320ms，折完再藏窗口。折叠途中如果来了校园网提示（`campus-hint`）或登录/同步文案（`auth-status` 的 logging、syncing），这一次收起作废，岛留在屏幕上。不要在折叠类名被清掉之后再 `hide()`，否则窗口会直接消失。`正在…` 的校园网提示不自动消。同步中也不开始新的 3 秒收起。独占全屏仍然立刻藏，不走这折。上课提醒弹出时会把岛喊回来，10 秒后若原先是隐藏的，再藏回去。
 
 独占全屏（D3D Exclusive）：普通置顶窗无法盖住。检测到 `QUNS_RUNNING_D3D_FULL_SCREEN` 时把岛藏起，退出全屏再显示。无边框窗口化游戏可以被置顶岛盖住。不要做注入/作弊覆盖。
 
@@ -169,7 +167,7 @@ nidong/
 | `intranet` | 校园网用原 URL；校外用 `webvpn::encrypt_url_to_webvpn`。算法以 `webvpn.rs` 为准 |
 | `campus-only` | 不在校园网就返回「校园网网关只能在校园网里打开」 |
 
-学校站点：校园网网关 `https://ipgw.neu.edu.cn/`（仅校园网）、校园邮箱 `https://mails.neu.edu.cn/`（新生指南里的学生邮箱；教师邮箱是另一台 `mail.neu.edu.cn`）、教务 `https://jwxt.neu.edu.cn/jwapp/sys/homeapp/index.do`、知网 `https://www.cnki.net/`、一号通门户 `https://portal.neu.edu.cn/tp_up/`。
+学校站点：校园网网关 `https://ipgw.neu.edu.cn/`（仅校园网）、校园邮箱 `https://mails.neu.edu.cn/`（新生指南里的学生邮箱；教师邮箱是另一台 `mail.neu.edu.cn`）、教务 `https://jwxt.neu.edu.cn/jwapp/sys/homeapp/index.do`、学校 OJ `http://oj.neu.edu.cn`（校外走 WebVPN）、知网 `https://www.cnki.net/`、一号通门户 `https://portal.neu.edu.cn/tp_up/`。
 
 其他：neu小站 `https://www.xn--xhq44jb2fzpc.com/`（标签「非官方资源共享站」）、NeuMathe `https://www.neumathe.cn/`（标签「数学机考刷题」）、MoMofish `https://www.momofish.top/`（标签「思政刷题」）、本仓库 `https://github.com/sapphire-xu/nidong`。
 
@@ -192,7 +190,9 @@ nidong/
 
 ## 日程
 
-真源 `agenda.json`，不进 `snapshot.json`。字段：名称、开始/结束（本地 `YYYY-MM-DDTHH:MM`，必须有、结束必须晚于开始）、是否提醒、提前分钟、备注。主页「今日」旁的加号、日程页页眉的加号，都打开同一个对话框。点日程块或今日列表里的日程行进入编辑。日程页是教学周的时钟周视图，见 `week.ts`：07:30–22:30，课和日程同一条时间轴；相交的块按簇分列；跨天按天切开；完全落在轴外的列在当天列底的「轴外」。日程提醒不跟「上课提醒」开关，条目自己勾选。退出登录会清 `agenda.json`。
+真源 `agenda.json`，不进 `snapshot.json`。只存在这台电脑上，不要上传或拉取一号通。字段：名称、地点、开始/结束（本地 `YYYY-MM-DDTHH:MM`，结束必须晚于开始）、重复（`isRepet` 加 `repetRule`：每天，或按星期 `Mo`–`Su`；结束用日期或 1–999 次）、提醒（代码 1、2、15、3、4、5、6、7；代码 7 要前一天的时刻）、备注。重复只存一条，今日和周视图按规则展开。主页「今日」旁的加号、日程页页眉的加号，都打开同一个对话框。点日程块或今日列表里的日程行进入编辑。日程页是教学周的时钟周视图，见 `week.ts`：07:30–22:30，课和日程同一条时间轴；相交的块按簇分列；跨天按天切开；完全落在轴外的列在当天列底的「轴外」。没有教学周时按自然周翻。日程块用淡青绿色：浅色底 `#d5f4ec`、字是东大蓝，深色底 `#8fd4c6`、深字。小点用同色相的 `#147a6e` / `#8fd4c6`。离线提示仍用警告色。网格上的日程块有地点就写在名称下面，原样显示，不走课程的地点文案。日程提醒不跟「上课提醒」开关，条目自己勾选。退出登录时可以选择留下或删掉本机日程。
+
+登录页可以「跳过登录」（`skipLogin`）。跳过后窗口和岛可用，但校园卡、网费、电费、课程、账单不展示、不请求。工具箱、任意门、关于、设置和本机日程照常。设置底部在未登录时是「去登录」。
 
 ## 改功能时去哪
 
@@ -227,7 +227,7 @@ nidong/
 
 ## 电费系统维护
 
-每天 **23:00–6:00**（`elec_night`：`hour >= 23 || hour < 6`）电费系统经常连不上：仍然尝试查询，超时 5 秒（白天 12 秒）。失败且同一房间、`remain_kwh` 还在：`ElecInfo.stale = true`（`serde(default)`），`errors.elec` 清空，主页写「 · 缓存」。白天失败：`stale = false`，有缓存仍显示度数并标「同步失败」；没有缓存才只显示「同步失败」。不要把读不到的余量写成 0。房间码改了才丢掉旧房间缓存。
+每天 **23:00–6:00**（`elec_night`：`hour >= 23 || hour < 6`）电费系统经常连不上：仍然尝试查询，超时 5 秒（白天 12 秒）。超时用刷新开始时的钟。失败怎么处理用结果写回那一刻的钟，课表可能把这次刷新拖过 23:00。缓存还能用的条件：`remain_kwh` 有值、不是未绑定、房间号对得上。房间号去掉 `-` 和空格再比。缓存里没有房间号也算同一间，并补上当前房间号。夜里：`stale = true`，`errors.elec` 清空，主页写「 · 缓存」，不要写「同步失败」，也不要拿掉度数。白天失败：`stale = false`，有度数仍显示并标「同步失败」；没有度数才只显示「同步失败」。房间号两边都有而且对不上，才丢掉旧读数。不要把读不到的余量写成 0。主页在 23:00–6:00 只要度数还在，就写「 · 缓存」，不写「同步失败」。
 
 ## 登录同步 vs 刷新
 
@@ -245,7 +245,7 @@ nidong/
 - 不要手选南湖/浑南；作息跟课的 `campus`
 - 不要把课表塞进每 20 分钟的余额刷新。每天最多自动打一次；没缓存或学期过期时下次刷新继续试
 - 不要用 `set_focus` 前置窗口，也不要在点击或双击里复位岛
-- 不要把 `3510409` 写成默认房间码，也不要枚举全校房间
+- 不要把某一次实测的房间码写成默认值，也不要枚举全校房间
 - 不要把密码/短信写进普通 json。关掉「记住密码」必须 `keyring_delete`，不要只改开关
 - 不要让 Esc 关岛或关 `desk`。窗口里 Esc 只关 Fluent 对话框
 - 不要在没网时把「会话已失效，请重新登录」盖在缓存上；没退出登录就继续显示缓存并标「离线状态」
@@ -253,7 +253,7 @@ nidong/
 - 不要在钩子回调里直接 `show` 窗口（`hotkey.rs` 已丢到主线程）
 - 抓数失败时不要用 0 覆盖上次的真实流量/余额，除非接口明确返回 0
 - 不要把 `SEGOEICONS.TTF` 或 WinUIonWeb 源码打进仓库。图标用 `@fluentui/react-icons` 的按名导入
-- 不要按界面改造计划或 prototype 把导航改回五项、把电费夜里逻辑改回跳过查询
+- 不要按 prototype 把导航改回五项、把电费夜里逻辑改回跳过查询。界面改造计划已删
 - 不要把 `%USERPROFILE%\.tauri\nidong.key` 写进仓库、Gitee 或 GitHub。公钥已经在 `tauri.conf.json`，私钥丢了之后发出去的安装包收不到后续更新
 - 不要在检查更新失败时弹窗、改岛或挡住主页。正式包打开窗口时静默检查；只有关于页手动检查失败才写「暂时检查不到更新」
 - 不要发现新版本就自动下载。下载只发生在用户点「更新并重启」之后
@@ -272,9 +272,27 @@ nidong/
 
 同名无线不算数。提交密码之前先访问 `https://pass.neu.edu.cn`，证书必须由系统信任，`danger_accept_invalid_certs` 保持关闭。密码只加密后 POST 到主机名恰好是 `pass.neu.edu.cn` 的 https（443，不能带用户名）。公钥只取这次页面，或程序里的学校公钥；脚本地址若不是这个主机，就用程序里的公钥，不要跟着别的网址走。证书无效、登录页落到别的主机、或表单要发到别的地址，返回「这不是校园网」，岛上写「这不是校园网，密码没提交」，断开当前无线，并暂停大约一分钟（40 个轮询）不再连接、不再登录。假热点若把流量原样转到学校服务器，密码会交到学校，假热点看不到明文。`http://ipgw.neu.edu.cn` 只用来看在线状态和交票据，票据只认 `pass.neu.edu.cn` 或 `ipgw.neu.edu.cn` 返回的，不要把密码写进这个 http 请求。
 
+## 免流文件互传
+
+工具箱里的一格，名字是「免流文件互传」。没登录泥洞也能用。不往悬浮岛发状态。关掉窗口继续分享，退出泥洞才停。一次一场，再次开始会换口令，旧口令失效。
+
+开始前后都能增删。同名文件只留最新的一份，下载编号不变，旧链接下到新文件。文件夹不分享，不递归。一次最多 100 个文件。
+
+`desk` 创建时 `visible: false`、`focus: false`，wry 第一次登记的拖放接不住后来的 WebView。打开工作区时 `desk_drop` 再登记，路径走 `desk-file-drop`。悬浮岛的 `dragDropEnabled` 保持 false。
+
+是否在校园网，看当前无线名：`NEU`、`NEU-2.4G`、`NEU-Mobile`，或设置里的校园网名称。用 `wlan::query` 和 `campus::is_campus_net`。不要用 `probe_campus_net`，手机热点也能连上教务。不在这些名字上仍可开始，先确认，取消是默认。有线接入、无线名对不上也走这次确认。进这一页就弹说明，勾过 `shareHintDismissed` 则不弹。取消勾选后下次再弹。不要用只记一次的标记把再次进入吃掉。
+
+服务只绑一个私网地址，不监听所有网卡。优先 `172.22.0.0/16`，其次 `10.0.0.0/8`，再 `192.168.0.0/16`。没有私网地址就不启动。局域网外访问不到这个地址。端口固定 `38721`，占用就写「38721 已被占用」。监听队列 256。同时下载最多 128 路，每路单独打开文件，按 64KB 送出，不把整个文件读进内存。
+
+页面是 `http://地址:38721/`。网址里没有口令。口令八位，形如 `K7M9-Q2PX`，只留在内存。网页上输入口令才列出文件。同一来源连续错 5 次，等 60 秒。对了发一次性 Cookie，下载要这枚 Cookie。接收方用浏览器，不用安装泥洞。文件名写进网页前转义。图标嵌 `icons/256x256.png`，不要嵌 64x64。页脚的版本和安装包地址在开始分享时读更新清单 `https://gitee.com/sapphire_fic/nidong/raw/master/updates/latest.json` 的 `version` 和 `platforms.windows-x86_64.url`，不要用 `CARGO_PKG_VERSION` 拼 exe 地址。清单失败或地址不是 `https://gitee.com/sapphire_fic/nidong/` 时，链接落到 Gitee 仓库页。
+
+分享开着时，导航底部有状态药丸，点它进入这一页。颜色见视觉设计。`share_start` 成功和 `share_stop` 发 `share-changed`。打开窗口时用 `share_offer` 看一眼。
+
+下载地址是 `/f/{编号}`，不是名单里的第几个。编号在这一场分享里固定。命令：`share_describe`、`share_start`、`share_stop`、`share_offer`、`share_revise`、`share_on_campus`。
+
 ## 关于
 
-关于页只有一句产品说明、作者 `sapphire_fic`、反馈邮箱 `xufeiyang@mails.neu.edu.cn`（`open_feedback` 打开 mailto），以及下方的版本和检查更新。不要把 Fluent / WinUIonWeb 那句写回关于页，它在 README。
+关于页只有一句产品说明、作者 `sapphire_fic`、反馈邮箱 `xufeiyang@mails.neu.edu.cn`（`open_feedback` 打开 mailto），以及下方的版本和检查更新。版本用 `getVersion()`，读正在运行的程序，来自 `tauri.conf.json`。不要在页面里写死。不要把 Fluent / WinUIonWeb 那句写回关于页，它在 README。
 
 ## 验证
 
@@ -292,6 +310,8 @@ GitHub 上的 v2.0.0 安装包没有这个插件，不能自己更新。第一�
 
 ## 打包与开源
 
-带签名的 Windows 安装包用仓库根目录的 `scripts\release.bat`。它要求私钥在 `%USERPROFILE%\.tauri\nidong.key`，口令为空，再跑 `npx tauri build`。`bundle.createUpdaterArtifacts` 已打开，没有这把私钥时 `tauri build` 会失败。`tauri dev` 不打包，不读私钥。NSIS 简体中文，产物 `src-tauri/target/release/bundle/nsis/泥洞_<version>_x64-setup.exe`，旁边的 `.sig` 全文贴进 Gitee 的 `updates/latest.json`。先上传安装包，再改清单。图标用 BMP-in-ICO（16/24/32/48/64/256），`installerIcon` 指向 `icons/icon.ico`。
+发版用 `scripts\publish.bat -Version x.y.z -Notes "写给用户的说明"`。它改 `package.json`、`tauri.conf.json`、`Cargo.toml` 的版本号，再跑 `scripts\release.ps1`。私钥在 `%USERPROFILE%\.tauri\nidong.key`，口令为空。产物复制成 `updates/nidong_<版本>_x64-setup.exe`，旁边 `.sig` 全文写入 `updates/latest.json`，然后推到 Gitee 的 `master` 和 `main`。更新地址读的是 `raw/master`，所以清单必须上 `master`。同一次推送里先有安装包，再改清单。`-NoPush` 只改本地文件。只要打包、不改版本、不推送，用 `scripts\release.bat`。
 
-开源仓库：https://github.com/sapphire-xu/nidong 。安装包可以放 GitHub Release，更新用的那份放 Gitee Release，清单放 Gitee 仓库的 `updates/latest.json`。不要把 `target/`、`tmp/`、cookie、snapshot、私钥推进 git。用户向 README 写功能和使用方法；实现细节仍以本文为准。
+`bundle.createUpdaterArtifacts` 已打开。没有私钥时 `tauri build` 会失败。`tauri dev` 不打包。NSIS 简体中文。图标用 BMP-in-ICO（16/24/32/48/64/256），`installerIcon` 指向 `icons/icon.ico`。
+
+开源仓库：https://github.com/sapphire-xu/nidong 。GitHub Release 可以另放一份安装包，脚本不传 GitHub。不要把 `target/`、`tmp/`、cookie、snapshot、私钥推进 git。用户向 README 写功能和使用方法。实现细节仍以本文为准。

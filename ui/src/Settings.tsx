@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Button,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
   Divider,
   Field,
   Input,
@@ -26,7 +32,7 @@ type Page = "hub" | "appearance" | "dorm" | "schedule" | "account" | "panel" | "
 const PAGES: { id: Page; title: string; desc: string; icon: JSX.Element }[] = [
   { id: "appearance", title: "外观", desc: "浅色、深色，或跟随系统", icon: <Color20Regular /> },
   { id: "dorm", title: "宿舍与余额", desc: "电费房间码、低余额阈值", icon: <Home20Regular /> },
-  { id: "schedule", title: "课表", desc: "第一周周一、同步课表", icon: <CalendarLtr20Regular /> },
+  { id: "schedule", title: "课表", desc: "第一周周一和课表", icon: <CalendarLtr20Regular /> },
   { id: "account", title: "启动与登录", desc: "记住密码、自动登录、开机自启", icon: <Person20Regular /> },
   { id: "panel", title: "面板行为", desc: "自动隐藏、快捷键、悬停唤出", icon: <Window20Regular /> },
   { id: "remind", title: "上课提醒", desc: "上课前弹出置顶提醒", icon: <Alert20Regular /> },
@@ -225,11 +231,14 @@ export function SettingsPanel(props: {
   courseSyncErr?: string;
   offline?: boolean;
   onSync: () => void;
-  onLogout: () => void;
+  onLogout: (keepAgenda: boolean) => void;
   onPreviewRemind: () => void;
+  loggedIn: boolean;
+  onRequestLogin: () => void;
 }) {
-  const { settings, setSettings, semester, cacheLabel, courseSync, courseSyncErr, offline, onSync, onLogout, onPreviewRemind } = props;
+  const { settings, setSettings, semester, cacheLabel, courseSync, courseSyncErr, offline, onSync, onLogout, onPreviewRemind, loggedIn, onRequestLogin } = props;
   const [page, setPage] = useState<Page>("hub");
+  const [leaveOpen, setLeaveOpen] = useState(false);
   const [motion, setMotion] = useState<"idle" | "back">("idle");
   const openPage = (next: Page) => {
     setMotion(next === "hub" && page !== "hub" ? "back" : "idle");
@@ -267,7 +276,26 @@ export function SettingsPanel(props: {
             </button>
           ))}
           <Divider />
-          <Button className="logout" appearance="secondary" onClick={onLogout}>退出登录</Button>
+          {loggedIn ? (
+            <>
+              <Button className="logout" appearance="secondary" onClick={() => setLeaveOpen(true)}>退出登录</Button>
+              <Dialog open={leaveOpen} onOpenChange={(_, data) => { if (!data.open) setLeaveOpen(false); }}>
+                <DialogSurface>
+                  <DialogBody>
+                    <DialogTitle>退出登录</DialogTitle>
+                    <DialogContent>本机上的日程可以留下，也可以一起删掉。</DialogContent>
+                    <DialogActions>
+                      <Button appearance="secondary" onClick={() => setLeaveOpen(false)}>取消</Button>
+                      <Button appearance="primary" onClick={() => { setLeaveOpen(false); onLogout(true); }}>保留日程</Button>
+                      <Button appearance="secondary" onClick={() => { setLeaveOpen(false); onLogout(false); }}>删除日程</Button>
+                    </DialogActions>
+                  </DialogBody>
+                </DialogSurface>
+              </Dialog>
+            </>
+          ) : (
+            <Button className="logout" appearance="secondary" onClick={onRequestLogin}>去登录</Button>
+          )}
         </div>
       )}
 
@@ -318,13 +346,14 @@ export function SettingsPanel(props: {
               ) : courseSync === "ok" ? (
                 <span className="sync-status ok"><Checkmark20Regular />已同步</span>
               ) : (
-                <Button appearance="subtle" disabled={offline} onClick={onSync}>
-                  {offline ? "离线" : courseSync === "fail" ? "重试同步" : "重新同步"}
+                <Button appearance="subtle" disabled={offline || !loggedIn} onClick={onSync}>
+                  {!loggedIn ? "未登录" : offline ? "离线" : courseSync === "fail" ? "重试同步" : "重新同步"}
                 </Button>
               )}
             </div>
           </div>
           {courseSync === "fail" && courseSyncErr ? <p className="hint warn">{courseSyncErr}</p> : null}
+          {!loggedIn ? <p className="hint">登录后才能同步课表。</p> : null}
           {offline ? <p className="hint">离线时不能打教务，连上网络后再同步。</p> : null}
         </div>
       )}
