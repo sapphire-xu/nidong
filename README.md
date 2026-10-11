@@ -40,7 +40,7 @@
 
 ## 安装（Windows）
 
-需要 64 位 Windows。已经装了 2.0.1 或更高版本的，打开窗口会检查到新版本，点「更新并重启」才下载。也可以从 [GitHub Releases](https://github.com/sapphire-xu/nidong/releases) 下载安装包。新安装用 Gitee 仓库 `updates` 目录里的 `nidong_2.3.1_x64-setup.exe`，或同一份 GitHub Release。装好后开始菜单里的名字是「泥洞」。
+需要 64 位 Windows。已经装了 2.0.1 或更高版本的，打开窗口会检查到新版本，点「更新并重启」才下载。新安装用 Gitee 仓库 `updates` 目录里的 `nidong_2.3.1_x64-setup.exe`。GitHub 仓库的 `updates` 目录里是同一份。装好后开始菜单里的名字是「泥洞」。
 
 macOS / Linux 版本还未支持，若有愿意提供测试环境的可与作者联系，我将感激不尽。
 
