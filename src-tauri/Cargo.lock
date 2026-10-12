@@ -2706,7 +2706,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nidong"
-version = "2.3.1"
+version = "2.3.4"
 dependencies = [
  "aes",
  "async-stream",
@@ -2719,6 +2719,7 @@ dependencies = [
  "hex",
  "if-addrs",
  "keyring",
+ "nidong-meter",
  "once_cell",
  "rand",
  "regex",
@@ -2743,6 +2744,17 @@ dependencies = [
  "urlencoding",
  "windows 0.61.3",
  "windows-core 0.61.2",
+]
+
+[[package]]
+name = "nidong-meter"
+version = "0.1.0"
+dependencies = [
+ "encoding_rs",
+ "if-addrs",
+ "serde",
+ "serde_json",
+ "windows 0.61.3",
 ]
 
 [[package]]

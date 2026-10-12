@@ -1,6 +1,6 @@
 [package]
 name = "nidong"
-version = "2.3.1"
+version = "2.3.4"
 description = "东北大学桌面小看板"
 authors = ["sapphire_fic"]
 edition = "2021"
@@ -44,6 +44,7 @@ axum = { version = "0.8", features = ["form"] }
 subtle = "2"
 async-stream = "0.3"
 if-addrs = "0.13"
+nidong-meter = { path = "meter" }
 socket2 = "0.5"
 windows-core = "0.61.2"
 windows = { version = "0.61", features = [
@@ -54,7 +55,10 @@ windows = { version = "0.61", features = [
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Ole",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Registry",
     "Win32_System_SystemServices",
+    "Win32_System_Threading",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
