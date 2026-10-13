@@ -1,0 +1,21 @@
+[package]
+name = "nidong-meter"
+version = "0.1.0"
+edition = "2021"
+description = "泥洞的本机校园网流量记录。单独进程，需要管理员权限。"
+
+[[bin]]
+name = "nidong-meter"
+path = "src/main.rs"
+
+[dependencies]
+encoding_rs = "0.8"
+if-addrs = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_NetworkManagement_WiFi",
+    "Win32_UI_Shell",
+] }

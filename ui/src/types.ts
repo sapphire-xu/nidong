@@ -131,6 +131,9 @@ export type AppSettings = {
   revealHotkey?: string;
   classRemind?: boolean;
   classRemindMinutes?: number;
+  remindSound?: boolean;
+  /** 0–100。旧配置没有此字段时按 100。 */
+  remindVolume?: number;
   campusWifiMode?: "off" | "offline" | "boot" | "hotspot" | "manual";
   campusWifiSsid?: string;
   campusHotspotSsid?: string;

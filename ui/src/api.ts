@@ -37,11 +37,42 @@ export const api = {
   shareOffer: () => invoke<ShareOffer | null>("share_offer"),
   shareRevise: (paths: string[]) => invoke<ShareOffer>("share_revise", { paths }),
   shareOnCampus: () => invoke<boolean>("share_on_campus"),
+  meterStatus: () => invoke<MeterStatus>("meter_status"),
+  publicIpv4: () => invoke<string>("public_ipv4"),
+  meterLog: () => invoke<MeterDay[]>("meter_log"),
+  meterEnable: () => invoke<void>("meter_enable"),
+  meterDisable: () => invoke<void>("meter_disable"),
+  meterOpenLog: () => invoke<void>("meter_open_log"),
 };
 
 export type ShareFile = { id?: number; path: string; name: string; bytes: number };
 
 export type ShareDescribe = { files: ShareFile[]; note?: string | null };
+
+export type MeterTotals = {
+  v4Day: number;
+  v4Night: number;
+  v4Up: number;
+  v6Down: number;
+  v6Up: number;
+};
+
+export type MeterStatus = {
+  enabled: boolean;
+  running: boolean;
+  onCampus: boolean;
+  ipv4: string;
+  ipv6: string;
+  v4DownBps: number;
+  v6DownBps: number;
+  night: boolean;
+  elevated: boolean;
+  today: MeterTotals | null;
+  month: MeterTotals | null;
+  error: string;
+};
+
+export type MeterDay = { date: string; totals: MeterTotals };
 
 export type ShareOffer = {
   url: string;

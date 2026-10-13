@@ -411,7 +411,7 @@ export function SharePanel(props: { settings: AppSettings; onSettings: (patch: P
       <Dialog open={help} onOpenChange={(_, data) => { if (!data.open) closeHelp(); }}>
         <DialogSurface className="safety-dialog">
           <DialogBody>
-            <DialogTitle>免流文件互传</DialogTitle>
+            <DialogTitle>免流文件分享</DialogTitle>
             <DialogContent className="safety-copy">
               <p><strong>基于校园网的文件传输，此过程不消耗流量。</strong></p>
               <p>发送和接收都要先连上校园网并登录。支持一百人以内同时下载。</p>
@@ -419,6 +419,7 @@ export function SharePanel(props: { settings: AppSettings; onSettings: (patch: P
               <p>关掉窗口也会继续分享，退出泥洞/停止分享才会停。</p>
               <p>分享开始后也可以增删文件。拖入同名文件，以新的那份为准。</p>
               <p>对方打不开页面时，请检查防火墙中设置允许泥洞访问公用网络。</p>
+              <p><strong>文件传输接受学校监管，请遵守网络规则。</strong></p>
             </DialogContent>
             <DialogActions fluid>
               <div className="share-help-actions">

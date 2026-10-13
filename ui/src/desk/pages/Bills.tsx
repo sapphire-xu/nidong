@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button, Tab, TabList } from "@fluentui/react-components";
 import { api } from "../../api";
+import { NetPanel } from "./NetPanel";
 import { fmtMoney, isJunkBill, pad, ymd } from "../../format";
 import type { DaySpend, Snapshot } from "../../types";
 
@@ -175,7 +176,12 @@ export function Bills(props: {
 
       <div className="bill-switch">
       <div key={tab} className={`bill-pane${pane.current.motion ? ` ${pane.current.motion}` : ""}`}>
-      {tab === "net" ? <NetDoc /> : (
+      {tab === "net" ? (
+        <NetPanel
+          portalBytes={snap?.net?.monthBytes}
+          portalKnown={!!snap?.net && !(snap.net.flowFromPortal === false && !snap.net.monthBytes)}
+        />
+      ) : (
         <>
           <div className="row-between">
             <div className="row-between">
@@ -267,50 +273,5 @@ export function Bills(props: {
       </div>
       </div>
     </div>
-  );
-}
-
-function NetDoc() {
-  return (
-    <article className="net-doc">
-      <p>东大校园网按「这个月用了多少校外 IPv4 下载流量」阶梯收费。</p>
-      <h3>什么要钱，什么不要钱</h3>
-      <ul>
-        <li><b>要钱：</b>用校园网的 IPv4 访问校外网站时，<b>下载</b>的那部分流量。</li>
-        <li><b>不要钱：</b>校内网站（教务、邮箱、门户等）、IPv6、你上传发出去的流量。</li>
-        <li><b>夜里不要钱：</b>每天 <b>0:00–6:00</b> 访问外网也不计费，适合下大文件。</li>
-      </ul>
-      <h3>怎么算这个月要交多少</h3>
-      <p>按自然月累计上面那种「要钱的流量」，对号入座。前面几档用满了，再按后面的档算。</p>
-      <table>
-        <thead>
-          <tr><th>本月已用</th><th>这个月网费</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>0–10 GB（含）</td><td>免费</td></tr>
-          <tr><td>10–25 GB（含）</td><td>超出 10 GB 的部分，1 元 / GB</td></tr>
-          <tr><td>25–40 GB（含）</td><td>一口价 15 元</td></tr>
-          <tr><td>40–45 GB（含）</td><td>15 元 + 超出 40 GB 的部分 1 元 / GB</td></tr>
-          <tr><td>45–80 GB（含）</td><td>一口价 20 元</td></tr>
-          <tr><td>80 GB 以上</td><td>20 元 + 超出 80 GB 的部分 1 元 / GB</td></tr>
-        </tbody>
-      </table>
-      <h3>举几个例子</h3>
-      <ul>
-        <li>用了 8 GB → <b>0 元</b></li>
-        <li>用了 18 GB → 超出免费的 8 GB × 1 元 → <b>8 元</b></li>
-        <li>用了 30 GB → 落在第三档 → <b>15 元</b></li>
-        <li>用了 42 GB → 15 元再加 2 GB → <b>17 元</b></li>
-        <li>用了 50 GB → 第五档一口价 → <b>20 元</b></li>
-        <li>用了 90 GB → 20 元再加 10 GB → <b>30 元</b></li>
-      </ul>
-      <h3>和看板上数字的关系</h3>
-      <ul>
-        <li>大数字是账户里<b>预存的余额</b>，流量费从这里扣。</li>
-        <li>「已用」是门户统计的<b>本月流量合计</b>。夜间免费段会不会从合计里剔除，以学校网关为准。</li>
-        <li>一个账号最多 <b>5 台</b>设备同时在线（电脑、手机都算）。</li>
-      </ul>
-      <p className="src">沈阳本校学生政策。秦皇岛分校不一样。收费依据：《东北大学会议纪要》（纪要〔2021〕13 号）。</p>
-    </article>
   );
 }

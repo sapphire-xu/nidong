@@ -39,6 +39,12 @@ taskkill /IM nidong.exe /F >nul 2>&1
 
 echo [nidong] starting. Close this window to quit.
 echo.
+call "%~dp0scripts\stage-meter.bat"
+if errorlevel 1 (
+  echo [nidong] meter sidecar failed.
+  pause
+  exit /b 1
+)
 call npm start
 echo.
 echo [nidong] exited.

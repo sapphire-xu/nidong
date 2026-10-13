@@ -46,6 +46,7 @@ export function About(props: {
     <div className="stack about-page">
       <h1 className="page-title">关于泥洞</h1>
       <p className="about-lead">非官方桌面看板工具，致力于集成多种校园生活功能，优化学生体验。</p>
+      <p className="hint">提醒铃声 Argon 来自 Android 开源工程，版权归 The Android Open Source Project，依照 Apache-2.0 使用。</p>
       <dl className="about-meta">
         <dt>作者</dt>
         <dd>sapphire_fic</dd>

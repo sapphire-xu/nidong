@@ -84,7 +84,7 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
           <div className="settings-breadcrumb">
             <button type="button" className="settings-breadcrumb-link" onClick={() => openPage("hub")}>工具箱</button>
             <span aria-hidden="true">›</span>
-            <h1 className="page-title">{page === "campus" ? "校园网自动登录" : "免流文件互传"}</h1>
+            <h1 className="page-title">{page === "campus" ? "校园网自动登录" : "免流文件分享"}</h1>
           </div>
         )}
       </div>
@@ -96,7 +96,7 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
           </button>
           <button type="button" className="tool-tile on" onClick={() => openPage("share")}>
             <span className="tool-ico" aria-hidden="true"><Share20Regular /></span>
-            <span className="tool-name">免流文件互传</span>
+            <span className="tool-name">免流文件分享</span>
           </button>
           {LATER.map((item, i) => (
             <button key={i} type="button" className="tool-tile is-wait" disabled>

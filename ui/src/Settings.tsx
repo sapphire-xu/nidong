@@ -35,7 +35,7 @@ const PAGES: { id: Page; title: string; desc: string; icon: JSX.Element }[] = [
   { id: "schedule", title: "课表", desc: "第一周周一和课表", icon: <CalendarLtr20Regular /> },
   { id: "account", title: "启动与登录", desc: "记住密码、自动登录、开机自启", icon: <Person20Regular /> },
   { id: "panel", title: "面板行为", desc: "自动隐藏、快捷键、悬停唤出", icon: <Window20Regular /> },
-  { id: "remind", title: "上课提醒", desc: "上课前弹出置顶提醒", icon: <Alert20Regular /> },
+  { id: "remind", title: "上课提醒", desc: "上课前弹出置顶提醒，可开铃声", icon: <Alert20Regular /> },
 ];
 
 function pad(n: number) {
@@ -428,6 +428,17 @@ export function SettingsPanel(props: {
               <Button appearance="secondary" onClick={onPreviewRemind}>预览动效</Button>
             </>
           ) : null}
+          <Switch label="提醒铃声" checked={!!s.remindSound} onChange={(_, d) => set({ remindSound: d.checked })} />
+          <Field label={`音量：${s.remindVolume ?? 100}`}>
+            <Slider
+              min={0}
+              max={100}
+              step={1}
+              value={s.remindVolume ?? 100}
+              onChange={(_, data) => set({ remindVolume: data.value })}
+            />
+          </Field>
+          <p className="hint">打开后，上课和日程提醒会响一声 Argon。音量只作用于这声提醒。默认关着。铃声开着时，预览动效也会按这个音量响。</p>
         </div>
       )}
     </div>

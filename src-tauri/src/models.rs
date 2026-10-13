@@ -244,6 +244,12 @@ pub struct AppSettings {
     pub class_remind: bool,
     #[serde(default = "default_remind_minutes")]
     pub class_remind_minutes: u32,
+    /// 上课和日程提醒是否响 Argon。旧配置没有此字段，默认关。
+    #[serde(default)]
+    pub remind_sound: bool,
+    /// 提醒铃声音量 0–100。旧配置没有此字段，按满音量。
+    #[serde(default = "default_remind_volume")]
+    pub remind_volume: u32,
     /// off / offline / boot / hotspot / manual。空和未知都当关闭。
     #[serde(default)]
     pub campus_wifi_mode: String,
@@ -256,7 +262,7 @@ pub struct AppSettings {
     /// 跳过登录进窗口。卡、网、电、课仍不可用。
     #[serde(default)]
     pub skip_login: bool,
-    /// 免流文件互传的说明勾过不再提示。
+    /// 免流文件分享的说明勾过不再提示。
     #[serde(default)]
     pub share_hint_dismissed: bool,
 }
@@ -282,6 +288,8 @@ impl Default for AppSettings {
             reveal_hotkey: default_reveal_hotkey(),
             class_remind: true,
             class_remind_minutes: default_remind_minutes(),
+            remind_sound: false,
+            remind_volume: default_remind_volume(),
             campus_wifi_mode: String::new(),
             campus_wifi_ssid: String::new(),
             campus_hotspot_ssid: String::new(),
@@ -317,6 +325,32 @@ fn default_reveal_hotkey() -> String {
 
 fn default_remind_minutes() -> u32 {
     15
+}
+
+fn default_remind_volume() -> u32 {
+    100
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    #[test]
+    fn old_settings_keep_full_remind_volume() {
+        let raw = r#"{
+            "roomNo": "",
+            "cardWarn": 100.0,
+            "netWarn": 10.0,
+            "elecWarn": 20.0,
+            "theme": "system",
+            "autostart": true,
+            "rememberPassword": true,
+            "autoLogin": true
+        }"#;
+        let s: AppSettings = serde_json::from_str(raw).unwrap();
+        assert!(!s.remind_sound);
+        assert_eq!(s.remind_volume, 100);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

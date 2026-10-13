@@ -193,6 +193,27 @@ button.card-hit { cursor: pointer; }
 .card-v { font-size: 28px; font-weight: 650; margin-top: 4px; }
 .card-u { font-size: 12px; color: var(--colorNeutralForeground3); margin-top: 2px; }
 .card-u.warn { color: var(--warn); font-weight: 560; }
+.cards > .fui-Card.has-meter { position: relative; }
+.cards > .fui-Card.has-meter .card-hit { box-sizing: border-box; padding-bottom: 20px; }
+.meter-pill {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  z-index: 1;
+  pointer-events: none;
+  user-select: none;
+  border-radius: 999px;
+  padding: 0 6px;
+  background: #d5f4ec;
+  color: #0b3a82;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 560;
+}
+[data-theme="dark"] .meter-pill {
+  background: #8fd4c6;
+  color: #06231f;
+}
 .fui-Card.warn-card {
   box-shadow:
     0 0 0 1px var(--warn),
@@ -510,10 +531,146 @@ button.mix-row { cursor: pointer; font: inherit; }
 .bill-empty { padding: 16px; text-align: center; color: var(--colorNeutralForeground3); }
 
 .net-doc { font-size: 14px; line-height: 1.55; max-width: 720px; }
+.net-doc.net-home { max-width: none; width: 100%; }
 .net-doc h3 { margin: 18px 0 6px; font-size: 14px; color: var(--colorBrandForeground1); }
 .net-doc table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.net-doc th, .net-doc td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--colorNeutralStroke2); vertical-align: top; }
+.net-doc th, .net-doc td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--colorNeutralStroke2); vertical-align: top; }
+.net-doc thead th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--colorNeutralForeground3);
+  background: var(--colorNeutralBackground2);
+  border-bottom-color: var(--colorNeutralStroke1);
+}
 .net-doc .src { font-size: 12px; color: var(--colorNeutralForeground3); }
+.net-split {
+  border: 0;
+  border-top: 1px solid var(--colorNeutralStroke1);
+  margin: 20px 0 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.net-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.net-log-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+.share-warn-actions .fui-Button { white-space: nowrap; }
+.net-toolbar {
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+}
+.net-toolbar-start {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.net-btn-close {
+  flex: none;
+  margin-left: auto;
+  border: 1px solid var(--warn, #c45a12) !important;
+  color: var(--warn, #c45a12) !important;
+  background: color-mix(in srgb, var(--warn, #c45a12) 12%, transparent) !important;
+}
+.net-btn-close:hover {
+  background: color-mix(in srgb, var(--warn, #c45a12) 20%, transparent) !important;
+}
+.net-live {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--colorBrandBackground) 22%, var(--colorNeutralStroke2));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--colorBrandBackground) 6%, var(--colorNeutralBackground1));
+}
+.net-live.muted {
+  border-color: var(--colorNeutralStroke2);
+  background: var(--colorNeutralBackground2);
+}
+.net-live-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--colorNeutralForeground3);
+}
+.net-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--colorNeutralStrokeAccessible, #93a1b5);
+  flex: none;
+}
+.net-dot.ok { background: var(--ok, #1f7a4d); }
+.net-addr-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.net-addr {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 8px;
+  background: var(--colorNeutralBackground1);
+}
+.net-addr-pair .net-addr {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 6px;
+  padding: 8px;
+}
+.net-addr .k { font-size: 12px; color: var(--colorNeutralForeground3); white-space: nowrap; }
+.net-addr .fui-Button { white-space: nowrap; }
+.net-addr code {
+  min-width: 0;
+  font-family: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  user-select: text !important;
+  cursor: text;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.net-rates { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.net-rate {
+  padding: 10px 12px;
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 8px;
+  background: var(--colorNeutralBackground1);
+}
+.net-rate .k { font-size: 12px; color: var(--colorNeutralForeground3); display: flex; align-items: center; gap: 6px; }
+.net-rate .v { margin-top: 4px; font-size: 18px; font-weight: 650; letter-spacing: -0.02em; }
+.net-tag {
+  font-size: 11px;
+  font-weight: 650;
+  padding: 1px 6px;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+.net-tag.bill { color: var(--warn, #c45a12); background: color-mix(in srgb, var(--warn, #c45a12) 14%, transparent); }
+.net-tag.free { color: var(--ok, #1f7a4d); background: color-mix(in srgb, var(--ok, #1f7a4d) 14%, transparent); }
+.net-portal { margin: 2px 0 0; font-size: 13px; color: var(--colorNeutralForeground3); }
+.net-sheet {
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: 8px;
+  overflow: auto;
+  background: var(--colorNeutralBackground1);
+}
+.net-sheet table {
+  margin: 0;
+  table-layout: fixed;
+}
+.net-sheet .net-col-head { width: 7.5em; }
+.net-sheet .net-col-eq { width: calc((100% - 7.5em) / 5); }
+.net-sheet th, .net-sheet td { overflow-wrap: break-word; }
+.net-sheet tr:last-child td { border-bottom: 0; }
+.net-log { max-height: 360px; }
+.net-sub { animation: nidong-settings-slide-in 420ms cubic-bezier(0.1, 0.9, 0.2, 1) both; }
+.net-hub { animation: nidong-settings-slide-back 420ms cubic-bezier(0.1, 0.9, 0.2, 1) both; }
 
 .set-list { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .set-item {
@@ -706,7 +863,9 @@ button.mix-row:focus-visible,
   .settings-sub-content,
   .settings-hub-content,
   .bill-pane.to-net,
-  .bill-pane.to-card { animation: nidong-settings-fade-in 16ms linear both; }
+  .bill-pane.to-card,
+  .net-sub,
+  .net-hub { animation: nidong-settings-fade-in 16ms linear both; }
 }
 @keyframes nidong-settings-fade-in {
   from { opacity: 0; }

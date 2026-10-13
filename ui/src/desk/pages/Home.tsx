@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { Button, Card, MessageBar, MessageBarBody } from "@fluentui/react-components";
+import { api } from "../../api";
 import { Add20Regular, ArrowSync20Regular, Checkmark20Regular } from "@fluentui/react-icons";
 import type { Agenda, AppSettings, Course, DaySpend, Snapshot } from "../../types";
 import { deriveDay } from "../../dayModel";
@@ -134,6 +136,21 @@ export function Home(props: {
   onRequestLogin: () => void;
 }) {
   const { snap, settings, now, clockOverridden, refreshUi, err, homeSpend, courseSync } = props;
+  const [watching, setWatching] = useState(false);
+  useEffect(() => {
+    let stop = false;
+    const pull = () => {
+      api.meterStatus().then((s) => {
+        if (!stop) setWatching(s.enabled);
+      }).catch(() => {});
+    };
+    pull();
+    const id = window.setInterval(pull, 4000);
+    return () => {
+      stop = true;
+      window.clearInterval(id);
+    };
+  }, []);
   const day = deriveDay(snap, settings, now);
   const loggedIn = !!snap?.loggedIn;
   const offline = !!snap?.offline;
@@ -208,7 +225,7 @@ export function Home(props: {
             )}
           </button>
         </Card>
-        <Card className={!loggedIn ? undefined : netWarn ? "warn-card" : undefined}>
+        <Card className={[loggedIn && netWarn ? "warn-card" : "", watching ? "has-meter" : ""].filter(Boolean).join(" ") || undefined}>
           <button type="button" className="card-hit" onClick={() => (loggedIn ? props.onOpenBills("net") : props.onRequestLogin())}>
             <div className="card-k">网费</div>
             {loggedIn ? (
@@ -232,6 +249,7 @@ export function Home(props: {
                 <div className="card-u">网费</div>
               </>
             )}
+            {watching ? <span className="meter-pill">监控中</span> : null}
           </button>
         </Card>
         <Card className={!loggedIn ? undefined : elecWarn ? "warn-card" : undefined}>

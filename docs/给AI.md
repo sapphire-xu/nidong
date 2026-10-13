@@ -49,8 +49,9 @@ nidong/
       pages/Settings.tsx   设置页外壳，内容转给 SettingsPanel
       pages/Doors.tsx      任意门
       pages/Home.tsx       主页
-      pages/Toolbox.tsx    工具箱。校园网自动登录、免流文件互传
-      pages/Share.tsx      免流文件互传：本机网页、口令、拖放和添加文件
+      pages/Toolbox.tsx    工具箱。校园网自动登录、免流文件分享
+      pages/Share.tsx      免流文件分享：本机网页、口令、拖放和添加文件
+      pages/NetPanel.tsx   网费页：计费规则、本机流量记录
       updateCheck.ts      向 Gitee 检查新版本，失败只返回 failed
     Settings.tsx     设置表单 SettingsPanel：六类；退出登录在底部
     EventForm.tsx    添加/编辑日程，Fluent Dialog，日期是年/月/日三格
@@ -64,6 +65,7 @@ nidong/
     lib.rs           启动、托盘、命令、定时刷新、open_desk、open_door
     campus.rs        校园网五种模式的监视循环，提示发 `campus-hint`
     wlan.rs          Windows wlanapi，按配置名连接
+    meter_cmd.rs     网费页开关本机流量记录。计数在 src-tauri/meter
     ipgw.rs          网关登录。单独客户端，不打开浏览器
     client.rs        CAS / 卡 / 网 / 电 / 账单
     course.rs        教务 JSON → SemesterTable，以及该不该打教务
@@ -74,6 +76,7 @@ nidong/
     crypto.rs        一号通 RSA
     periods.rs       南湖/浑南作息
     util.rs / webvpn.rs
+  src-tauri/meter/   提权的 nidong-meter.exe：采样、账本、计划任务
   docs/              开发文档、视觉设计、本文、prototype
   scripts/           set-now.bat / clear-now.bat 测时钟；release.bat 打带签名的安装包
   updates/latest.example.json   更新清单示例。不要改名成 latest.json 拿去当线上文件
@@ -113,14 +116,14 @@ nidong/
 | 再次启动已在运行的实例 | 叫出岛，并打开或前置 `desk` |
 | 托盘「复位岛」 | 岛贴顶居中，高度保持 40。不关 `desk` |
 | Esc | 岛上没有面板。窗口里只关 Fluent 对话框 |
-| 上课提醒 | 岛上 40px 置顶约 10 秒。点这下岛会打开窗口 |
+| 上课提醒 | 岛上 40px 置顶约 10 秒。点这下岛会打开窗口。铃声是 Argon，设置里默认关，音量 0–100，默认 100 |
 | 独占全屏 | 只藏岛。`desk` 保持原样 |
 
 未登录且 `skipLogin` 为假时，`desk` 只显示登录，短信验证是登录的下一步，不进导航。点过「跳过登录」则进入导航，但卡、网、电、课、账单不请求。离线且上次没退出：直接进主页，信息条写「离线状态」。在线但会话失效、且没有跳过：进登录。
 
 `save_settings` 成功后向两个窗口发 `settings-updated`。日程的增删和手动刷新会发 `snapshot-updated`，岛上的提醒才看得到新日程。
 
-自动隐藏：设置 → 面板行为。字段 `autoHideHover` 还在，文案是「悬停唤出」。收起先把岛向上折 320ms，折完再藏窗口。折叠途中如果来了校园网提示（`campus-hint`）或登录/同步文案（`auth-status` 的 logging、syncing），这一次收起作废，岛留在屏幕上。不要在折叠类名被清掉之后再 `hide()`，否则窗口会直接消失。`正在…` 的校园网提示不自动消。同步中也不开始新的 3 秒收起。独占全屏仍然立刻藏，不走这折。上课提醒弹出时会把岛喊回来，10 秒后若原先是隐藏的，再藏回去。
+自动隐藏：设置 → 面板行为。字段 `autoHideHover` 还在，文案是「悬停唤出」。收起先把岛向上折 320ms，折完再藏窗口。折叠途中如果来了校园网提示（`campus-hint`）或登录/同步文案（`auth-status` 的 logging、syncing），这一次收起作废，岛留在屏幕上。不要在折叠类名被清掉之后再 `hide()`，否则窗口会直接消失。`正在…` 的校园网提示不自动消。同步中也不开始新的 3 秒收起。独占全屏仍然立刻藏，不走这折。上课提醒弹出时会把岛喊回来，10 秒后若原先是隐藏的，再藏回去。岛已经露着时再次叫出（快捷键、再次启动、复位）要重新算 3 秒，不能把计时清掉后就停。指针还在岛上、或这一次收起没完成，继续排下一次，不要停在露出的状态。
 
 独占全屏（D3D Exclusive）：普通置顶窗无法盖住。检测到 `QUNS_RUNNING_D3D_FULL_SCREEN` 时把岛藏起，退出全屏再显示。无边框窗口化游戏可以被置顶岛盖住。不要做注入/作弊覆盖。
 
@@ -190,7 +193,7 @@ nidong/
 
 ## 日程
 
-真源 `agenda.json`，不进 `snapshot.json`。只存在这台电脑上，不要上传或拉取一号通。字段：名称、地点、开始/结束（本地 `YYYY-MM-DDTHH:MM`，结束必须晚于开始）、重复（`isRepet` 加 `repetRule`：每天，或按星期 `Mo`–`Su`；结束用日期或 1–999 次）、提醒（代码 1、2、15、3、4、5、6、7；代码 7 要前一天的时刻）、备注。重复只存一条，今日和周视图按规则展开。主页「今日」旁的加号、日程页页眉的加号，都打开同一个对话框。点日程块或今日列表里的日程行进入编辑。日程页是教学周的时钟周视图，见 `week.ts`：07:30–22:30，课和日程同一条时间轴；相交的块按簇分列；跨天按天切开；完全落在轴外的列在当天列底的「轴外」。没有教学周时按自然周翻。日程块用淡青绿色：浅色底 `#d5f4ec`、字是东大蓝，深色底 `#8fd4c6`、深字。小点用同色相的 `#147a6e` / `#8fd4c6`。离线提示仍用警告色。网格上的日程块有地点就写在名称下面，原样显示，不走课程的地点文案。日程提醒不跟「上课提醒」开关，条目自己勾选。退出登录时可以选择留下或删掉本机日程。
+真源 `agenda.json`，不进 `snapshot.json`。只存在这台电脑上，不要上传或拉取一号通。字段：名称、地点、开始/结束（本地 `YYYY-MM-DDTHH:MM`，结束必须晚于开始）、重复（`isRepet` 加 `repetRule`：每天，或按星期 `Mo`–`Su`；结束用日期或 1–999 次）、提醒（代码 1、2、15、3、4、5、6、7；代码 7 要前一天的时刻）、备注。重复只存一条，今日和周视图按规则展开。主页「今日」旁的加号、日程页页眉的加号，都打开同一个对话框。点日程块或今日列表里的日程行进入编辑。日程页是教学周的时钟周视图，见 `week.ts`：07:30–22:30，课和日程同一条时间轴；相交的块按簇分列；跨天按天切开；完全落在轴外的列在当天列底的「轴外」。没有教学周时按自然周翻。日程块用淡青绿色：浅色底 `#d5f4ec`、字是东大蓝，深色底 `#8fd4c6`、深字。小点用同色相的 `#147a6e` / `#8fd4c6`。离线提示仍用警告色。网格上的日程块有地点就写在名称下面，原样显示，不走课程的地点文案。日程提醒不跟「上课提醒」开关，条目自己勾选。铃声跟设置里的 `remindSound`，默认关，开了上课和日程都响 Argon（`ui/public/sounds/argon.ogg`）。音量是 `remindVolume`，0–100，旧配置按 100。关于页写明 Argon 来自 Android 开源工程、版权 The Android Open Source Project、Apache-2.0；全文在 `ui/public/sounds/NOTICE.txt`。退出登录时可以选择留下或删掉本机日程。
 
 登录页可以「跳过登录」（`skipLogin`）。跳过后窗口和岛可用，但校园卡、网费、电费、课程、账单不展示、不请求。工具箱、任意门、关于、设置和本机日程照常。设置底部在未登录时是「去登录」。
 
@@ -206,7 +209,7 @@ nidong/
 | 时钟周视图的位置和分列 | `ui/src/week.ts`。`Schedule.tsx` 只负责画 |
 | 自定义日程 | `ui/src/EventForm.tsx` + `agenda.ts` + `src-tauri/src/agenda.rs` |
 | 登录、卡、网、电、账单 | `src-tauri/src/client.rs` |
-| 网费计费说明 | `ui/src/desk/pages/Bills.tsx` 的网费一段。0:00–6:00 不计费是这段文案，和电费夜里缓存不是一回事 |
+| 网费计费说明、本机流量记录 | `ui/src/desk/pages/NetPanel.tsx`。0:00–6:00 不计费是这段文案，和电费夜里缓存不是一回事。记录进程在 `src-tauri/meter` |
 | 教务课表解析、每天打一次 | `src-tauri/src/course.rs`（规则见下） |
 | 托盘、`open_desk`、刷新编排 | `src-tauri/src/lib.rs` |
 | 岛的颜色和圆角 | `ui/src/styles.css` |
@@ -233,12 +236,21 @@ nidong/
 
 两套入口都进 `refresh_inner`，不要另写一套登录抓数。差别只在登录刚结束时 WebVPN 还没种上。校外必须先 `prepare_access()`（一号通换 WebVPN 票，失败再试一次），再并行拉卡/网/电/课；账单等卡的 SSO 回来再拉。不要把卡和 WebVPN 换票塞进同一个 22 秒超时里，否则登录后会误报「校外连不上」，手动刷新（票已经有了）却成功。
 
+## 本机流量记录
+
+随安装包带上 `nidong-meter.exe`，默认关。泥洞本身不要 `requireAdministrator`。开启要 UAC，登记计划任务 `NidongMeter`（登录、最高权限、`--run`），关掉窗口也不停。再关一次删任务。安装、覆盖、卸载前 `windows/hooks.nsh` 会写 `meter/stop`、结束计划任务、再等进程退出，避免文件占用导致「无法卸载」。覆盖装完会清掉 stop 文件并 `/Run` 任务。
+
+只在校园网记账：无线名与自动登录同一组（`NEU` / `NEU-2.4G` / `NEU-Mobile` + 设置里的名称；`NEUQ` 不算），或本机 `172.22.0.0/16` / `2001:da8:9000::/48`。不要改成「能连上教务」。不在校园网仍采样，只挪基线。
+
+账本 `%APPDATA%\edu.neu.nidong\meter\`，一天一行五项（白天校外 IPv4 下载、夜里 IPv4 下载、IPv4 上传、IPv6 下载、IPv6 上传）。校内 IPv4 下载和 UDP 不进表。全 0 的日子不写、不补。开了记录后规则和日志进子页；日志页可打开 `usage.txt`。网费页速度仍写「校外 IPv4 下载」「校外 IPv6 下载」，白天计费、夜里免费，不显示上传速度。正在记录且人在校园网时，校内 IPv4 和对外 IPv4 同一行，IPv6 仍单独一行。对外地址由主进程问一个只回 IPv4 的回显，成功缓存 3 分钟；失败沿用 30 分钟内的上次结果，没有就写「没有读到」。不要把这次查询放进 `nidong-meter` 的两秒循环。主页网费卡右下角在流量记录开启时有一枚不大的「监控中」，颜色跟免流分享药丸一样，不要做成按钮。门户 `sum_bytes` 仍叫「校园网记录」。`--run` 没管理员就安静退出，不要写 `error.txt`，也不要用读失败比例弹警告。`nidong-meter.exe` 用 windows 子系统，不要弹控制台。按钮跟免流文件分享：次要 `secondary`，开启 `primary`，关闭用警告黄。五项列表等宽。
+
 ## 网费「已用 0B」
 
 余额来自缴费大厅 `queryNetAccBalance`，流量来自门户 `getWlzzList` 的 `sum_bytes`。CAS 换票后要再 GET 门户 `view?m=up` 才种得上会话。门户种不上（含门户页写「统一身份认证」被误判成登录页）时，**不要**把整次网费打成「会话已失效，请重新登录」——卡/电/课还活着；余额仍走缴费大厅，流量 `flowFromPortal=false`。解析不到 `sum_bytes` 则刷新沿用上次流量；从未成功过则 UI 写「已用 —」。一号通 HTML 出现「访问被拒绝」要单独提示换网络，不要说成密码错。
 
 ## 不要做
 
+- 不要把 `requireAdministrator` 加到 `nidong.exe`。流量记录只在 `nidong-meter.exe` 里提权
 - 不要把岛拉高变成窗口，也不要在两个系统窗口之间做形变
 - 不要自绘标题栏。`desk` 用系统标题栏
 - 不要在设置里放位置选项，也不要加岛的位置字段。校园网模式是 `AppSettings` 的 `campusWifiMode` / `campusWifiSsid` / `campusHotspotSsid`，空模式等于关闭
@@ -260,7 +272,7 @@ nidong/
 
 ## 托盘
 
-左键直接打开窗口，不弹出菜单。右键菜单：校园卡、网费、电费（只显示余额，点击不做任何事）→ 打开窗口 → 刷新 → 复位岛（贴顶居中，不关窗口）→ 退出。余额随 `snapshot-updated` 改字。
+左键直接打开窗口，不弹出菜单。悬停图标显示校园卡、网费、电费。流量记录开着时，下面再加当前下载速度，写成 `IPv4  12 KB/s`、`IPv6  0 B/s`，不要写「校外」。记录开着但这一刻没有新样本，或人不在校园网，速度写「—」，不要写成 0。右键菜单：打开窗口 → 刷新 → 复位岛（贴顶居中，不关窗口）→ 退出。余额随 `snapshot-updated` 改字。悬停文字大约每 2 秒重算，这次读取走 `meter_status`。Windows 提示最多 127 个字。
 
 ## 校园网自动登录
 
@@ -272,9 +284,9 @@ nidong/
 
 同名无线不算数。提交密码之前先访问 `https://pass.neu.edu.cn`，证书必须由系统信任，`danger_accept_invalid_certs` 保持关闭。密码只加密后 POST 到主机名恰好是 `pass.neu.edu.cn` 的 https（443，不能带用户名）。公钥只取这次页面，或程序里的学校公钥；脚本地址若不是这个主机，就用程序里的公钥，不要跟着别的网址走。证书无效、登录页落到别的主机、或表单要发到别的地址，返回「这不是校园网」，岛上写「这不是校园网，密码没提交」，断开当前无线，并暂停大约一分钟（40 个轮询）不再连接、不再登录。假热点若把流量原样转到学校服务器，密码会交到学校，假热点看不到明文。`http://ipgw.neu.edu.cn` 只用来看在线状态和交票据，票据只认 `pass.neu.edu.cn` 或 `ipgw.neu.edu.cn` 返回的，不要把密码写进这个 http 请求。
 
-## 免流文件互传
+## 免流文件分享
 
-工具箱里的一格，名字是「免流文件互传」。没登录泥洞也能用。不往悬浮岛发状态。关掉窗口继续分享，退出泥洞才停。一次一场，再次开始会换口令，旧口令失效。
+工具箱里的一格，名字是「免流文件分享」。没登录泥洞也能用。不往悬浮岛发状态。关掉窗口继续分享，退出泥洞才停。一次一场，再次开始会换口令，旧口令失效。
 
 开始前后都能增删。同名文件只留最新的一份，下载编号不变，旧链接下到新文件。文件夹不分享，不递归。一次最多 100 个文件。
 
@@ -306,11 +318,13 @@ nidong/
 
 正式包（`import.meta.env.PROD`）打开工作区时静默 `check`，超时 20 秒。`npm start` 不自动打 Gitee。关于页「检查更新」总会打。有新版本时，主内容上方一条：版本、`更新并重启`、`稍后`（这次打开先藏起来，关于页仍可安装）。点更新才 `downloadAndInstall`，然后 `relaunch`。Windows 上安装程序会先退出泥洞，剩下的是 NSIS 的小进度窗。检查走插件自带的 rustls，和抓数用的 native-tls 不是同一条。校园网拦 TLS 时检查失败，保持安静，不要为了这个去改 TLS。
 
+应用内更新只覆盖注册表 `Software\sapphire_fic\泥洞` 记下的目录，并且 `/UPDATE` 不改快捷方式。开机自启的值名是 `Nidong`，写的是当时启动的那个 exe。桌面、开始菜单若还指着另一份旧的 `nidong.exe`，关于页就是那份旧版本，更新提示则来自清单。安装结束时 `windows/hooks.nsh` 把桌面快捷方式、开始菜单快捷方式和已有的 `Nidong` 自启指到 `$INSTDIR\nidong.exe`。卸载时删 `Nidong`，不要只删产品名那条。正式包启动时，若注册表里的安装比自己新，就改去打开那一份，不要再把自启写回旧路径。自己就是那一份时，先结束其他目录里的 `nidong.exe`，免得旧托盘占着单实例。`target\debug` 和 `target\release` 不跳，也不要结束。
+
 GitHub 上的 v2.0.0 安装包没有这个插件，不能自己更新。第一份带更新的安装包版本要高于 2.0.0，用户手动装一次。
 
 ## 打包与开源
 
-发版用 `scripts\publish.bat -Version x.y.z -Notes "写给用户的说明"`。它改 `package.json`、`tauri.conf.json`、`Cargo.toml` 的版本号，再跑 `scripts\release.ps1`。私钥在 `%USERPROFILE%\.tauri\nidong.key`，口令为空。产物复制成 `updates/nidong_<版本>_x64-setup.exe`，旁边 `.sig` 全文写入 `updates/latest.json`，然后推到 Gitee 的 `master` 和 `main`。更新地址读的是 `raw/master`，所以清单必须上 `master`。同一次推送里先有安装包，再改清单。`-NoPush` 只改本地文件。只要打包、不改版本、不推送，用 `scripts\release.bat`。
+发版用 `scripts\publish.bat -Version x.y.z -Notes "写给用户的说明"`。它改 `package.json`、`tauri.conf.json`、`Cargo.toml` 的版本号，再跑 `scripts\release.ps1`。私钥在 `%USERPROFILE%\.tauri\nidong.key`，口令为空。产物复制成 `updates/nidong_<版本>_x64-setup.exe`，旁边 `.sig` 全文写入 `updates/latest.json`，然后推到 Gitee 的 `master` 和 `main`。写入清单前核对安装包的 `ProductVersion`，对不上就改回版本号并失败，不要把旧包写成新版本。版本必须高于 `updates/latest.json`。源码已经是这个版本、清单还是旧的，可以再跑同一次发布。低于清单，或低于源码里的版本，直接拒绝。更新地址读的是 `raw/master`，所以清单必须上 `master`。同一次推送里先有安装包，再改清单。`-NoPush` 只改本地文件。只要打包、不改版本、不推送，用 `scripts\release.bat`。`release.bat` 不改 `latest.json`。`beforeBundleCommand` 的工作目录是仓库根，流量计脚本写 `src-tauri/meter/stage.ps1`。前端 `built` 只是网页打包，安装包要等 NSIS 结束才出现。
 
 `bundle.createUpdaterArtifacts` 已打开。没有私钥时 `tauri build` 会失败。`tauri dev` 不打包。NSIS 简体中文。图标用 BMP-in-ICO（16/24/32/48/64/256），`installerIcon` 指向 `icons/icon.ico`。
 

@@ -63,9 +63,24 @@ function Escape-Json([string]$s) {
   return $sb.ToString()
 }
 
+function Read-ManifestVersion {
+  $path = Join-Path $root "updates\latest.json"
+  if (-not (Test-Path -LiteralPath $path)) { return "0.0.0" }
+  $text = [System.IO.File]::ReadAllText($path)
+  if ($text -notmatch '"version"\s*:\s*"(\d+\.\d+\.\d+)"') {
+    throw "updates\latest.json 里没有版本号"
+  }
+  return $Matches[1]
+}
+
 $current = Read-CurrentVersion
-if ([Version]$Version -le [Version]$current) {
-  Write-Error "版本 $Version 不高于当前 $current。已安装的泥洞只认更高的清单版本。"
+$published = Read-ManifestVersion
+if ([Version]$Version -le [Version]$published) {
+  Write-Error "版本 $Version 不高于已发布的 $published。已安装的泥洞只认更高的清单版本。"
+  exit 1
+}
+if ([Version]$Version -lt [Version]$current) {
+  Write-Error "源码版本已经是 $current，高于要发的 $Version。要发就用 $current 或更高。"
   exit 1
 }
 
@@ -89,6 +104,9 @@ function Restore-Versions {
 
 $verJson = '"version": "' + $Version + '"'
 try {
+  if ($current -eq $Version) {
+    Write-Output "源码已经是 $Version，接着打包"
+  } else {
   Replace-Once "package.json" '"version"\s*:\s*"\d+\.\d+\.\d+"' $verJson
   Replace-Once "src-tauri\tauri.conf.json" '"version"\s*:\s*"\d+\.\d+\.\d+"' $verJson
   Replace-Once "src-tauri\Cargo.toml" 'version = "\d+\.\d+\.\d+"' ('version = "' + $Version + '"')
@@ -101,6 +119,7 @@ try {
   if ($lock2 -eq $lock) { throw "没有改到 package-lock.json 的版本号" }
   $utf8 = New-Object System.Text.UTF8Encoding $false
   [System.IO.File]::WriteAllText((Join-Path $root "package-lock.json"), $lock2, $utf8)
+  }
 } catch {
   Restore-Versions
   throw
@@ -108,16 +127,28 @@ try {
 
 Write-Output "打包 $Version"
 cmd /c "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\release.ps1"
-if ($LASTEXITCODE -ne 0) {
-  Restore-Versions
-  Write-Error "打包失败，版本号已改回 $current"
-  exit $LASTEXITCODE
+$buildCode = $LASTEXITCODE
+if ($buildCode -ne 0) {
+  Write-Output "打包退出码 $buildCode。继续查找已经打好的 $Version 安装包。"
 }
 
 $nsis = Join-Path $root "src-tauri\target\release\bundle\nsis"
-$exe = Get-ChildItem -LiteralPath $nsis -Filter "*_${Version}_x64-setup.exe" | Select-Object -First 1
+$exe = Get-ChildItem -LiteralPath $nsis -Filter "*_${Version}_x64-setup.exe" |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1
 if (-not $exe) {
-  Write-Error "没有找到 $Version 的安装包。版本号留在 $Version，安装包还在 nsis 目录里。"
+  if ($buildCode -ne 0) {
+    Restore-Versions
+    Write-Error "打包失败，也没有 $Version 的安装包。版本号已改回 $current"
+    exit $buildCode
+  }
+  Write-Error "没有找到 $Version 的安装包。nsis 目录里没有 *_${Version}_x64-setup.exe。版本号留在 $Version。"
+  exit 1
+}
+$product = [string]$exe.VersionInfo.ProductVersion
+if ($product -notmatch ('^' + [regex]::Escape($Version) + '(\.|$)')) {
+  Restore-Versions
+  Write-Error "安装包 $product 不是 $Version。版本号已改回 $current。没有写入更新清单。"
   exit 1
 }
 $sigPath = $exe.FullName + ".sig"

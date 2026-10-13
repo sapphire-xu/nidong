@@ -12,12 +12,20 @@ export function withSettingDefaults(s: AppSettings): AppSettings {
     revealHotkey: s.revealHotkey === "Tab+Q" || !s.revealHotkey ? "Ctrl+Q" : s.revealHotkey,
     classRemind: s.classRemind !== false,
     classRemindMinutes: Math.max(1, Math.floor(Number(s.classRemindMinutes) || 15)),
+    remindSound: s.remindSound === true,
+    remindVolume: clampVolume(s.remindVolume),
     campusWifiMode: mode,
     campusWifiSsid: s.campusWifiSsid || "",
     campusHotspotSsid: s.campusHotspotSsid || "",
     skipLogin: s.skipLogin === true,
     shareHintDismissed: s.shareHintDismissed === true,
   };
+}
+
+export function clampVolume(volume: number | undefined) {
+  const v = Math.round(Number(volume));
+  if (!Number.isFinite(v)) return 100;
+  return Math.min(100, Math.max(0, v));
 }
 
 export function resolveTheme(theme: string | undefined) {

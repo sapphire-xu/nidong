@@ -4,13 +4,27 @@ import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { upcomingAgenda } from "./agenda";
 import { upcomingCourse } from "./course";
+import { HIDE_AFTER_MS, nextHideTick, revealShouldRearm } from "./autoHide";
 import { deriveDay } from "./dayModel";
 import { fmtMoney, ymd } from "./format";
-import { resolveTheme, withSettingDefaults } from "./prefs";
+import { clampVolume, resolveTheme, withSettingDefaults } from "./prefs";
 import type { AppSettings, Course, Snapshot } from "./types";
 import { useClock } from "./useClock";
 
 const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
+
+let remindAudio: HTMLAudioElement | null = null;
+function playRemindSound(volume: number) {
+  if (remindAudio) {
+    remindAudio.pause();
+    remindAudio.currentTime = 0;
+  }
+  const a = new Audio("/sounds/argon.ogg");
+  const level = Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 1;
+  a.volume = level;
+  remindAudio = a;
+  void a.play().catch(() => undefined);
+}
 
 function stopHoverWatch() {
   return api.setHoverWatch({ enabled: false, x: 0, y: 0, width: 0, height: 0 }).catch(() => undefined);
@@ -48,7 +62,13 @@ export default function App() {
   const preRemindRef = useRef<{ hidden: boolean } | null>(null);
   const remindedId = useRef("");
   const startRemindRef = useRef<(c: Course & { kind?: "class" | "event" }) => void>(() => undefined);
+  const remindSoundRef = useRef(false);
+  const remindVolumeRef = useRef(1);
   const revealIslandRef = useRef<() => void>(() => undefined);
+  const scheduleRef = useRef<(ms: number) => void>(() => undefined);
+  const idleSince = useRef(0);
+  const stowSince = useRef(0);
+  const stowingRef = useRef(false);
   const gameFsRef = useRef(false);
   const hiddenBeforeFs = useRef(false);
   const openingDeskRef = useRef(false);
@@ -63,7 +83,7 @@ export default function App() {
   const loggedIn = !!snap?.loggedIn;
   hiddenRef.current = hidden;
   remindRef.current = remind;
-  hoveredRef.current = hovered;
+  stowingRef.current = stowing;
   autoHideRef.current = !!settings?.autoHide;
   autoHideHoverRef.current = !!settings?.autoHideHover;
   silentLoginRef.current = silentLogin;
@@ -88,17 +108,28 @@ export default function App() {
     api.settings().then((s) => setSettings(withSettingDefaults(s))).catch(() => undefined);
   }, []);
 
+  const abortStow = (gen: number) => {
+    if (hideGen.current !== gen) return;
+    stowingRef.current = false;
+    stowSince.current = 0;
+    setStowing(false);
+  };
+
   const hideIsland = useCallback(async () => {
     if (!autoHideRef.current || remindRef.current || campusHintRef.current || silentLoginRef.current || hiddenRef.current) return;
+    if (gameFsRef.current || document.getElementById("root")?.matches(":hover")) return;
     const gen = ++hideGen.current;
+    stowingRef.current = true;
+    stowSince.current = performance.now();
     setStowing(true);
     await sleep(320);
     // 折叠途中如果来了校园网提示或同步文案，reveal 会把这一代作废。
     // 位置查询也是 await。作废之后不能再 hide()，否则动画被掐掉，窗口直接没了。
     const cancelled = () =>
-      hideGen.current !== gen || !!remindRef.current || gameFsRef.current || !!campusHintRef.current || silentLoginRef.current;
+      hideGen.current !== gen || !!remindRef.current || gameFsRef.current || !!campusHintRef.current || silentLoginRef.current
+      || !!document.getElementById("root")?.matches(":hover");
     if (cancelled()) {
-      if (hideGen.current === gen) setStowing(false);
+      abortStow(gen);
       return;
     }
     const w = getCurrentWindow();
@@ -107,7 +138,7 @@ export default function App() {
         const pos = await w.outerPosition();
         const size = await w.outerSize();
         if (cancelled()) {
-          if (hideGen.current === gen) setStowing(false);
+          abortStow(gen);
           return;
         }
         const pad = 24;
@@ -122,15 +153,19 @@ export default function App() {
         await stopHoverWatch();
       }
       if (cancelled()) {
-        if (hideGen.current === gen) setStowing(false);
+        abortStow(gen);
         return;
       }
+      hiddenRef.current = true;
       setHidden(true);
       await w.hide();
       // hide() 返回时，提示可能已经把折叠类名清掉。这时再留着隐藏，岛就是直接没了。
       if (cancelled()) {
+        hiddenRef.current = false;
+        stowingRef.current = false;
+        stowSince.current = 0;
         setHidden(false);
-        if (hideGen.current === gen) setStowing(false);
+        setStowing(false);
         try {
           await api.raiseTopmost();
         } catch {
@@ -143,8 +178,9 @@ export default function App() {
       }
     } catch {
       if (hideGen.current === gen) {
-        setStowing(false);
+        hiddenRef.current = false;
         setHidden(false);
+        abortStow(gen);
       }
     }
   }, []);
@@ -153,6 +189,9 @@ export default function App() {
     hideGen.current += 1;
     window.clearTimeout(hideTimer.current);
     window.clearTimeout(hoverRevealTimer.current);
+    stowingRef.current = false;
+    stowSince.current = 0;
+    hiddenRef.current = false;
     setStowing(false);
     setHidden(false);
     await stopHoverWatch();
@@ -165,9 +204,18 @@ export default function App() {
         /* ignore */
       }
     }
+    // 岛本来就露着时，hidden 不变，上面的效果不会重跑。这里必须自己把 3 秒排回去。
+    if (revealShouldRearm(autoHideRef.current, hiddenRef.current)) {
+      idleSince.current = performance.now();
+      scheduleRef.current(HIDE_AFTER_MS);
+    }
   }, []);
 
+  remindSoundRef.current = settings?.remindSound === true;
+  remindVolumeRef.current = clampVolume(settings?.remindVolume) / 100;
+
   const startRemind = useCallback(async (course: Course & { kind?: "class" | "event" }) => {
+    if (remindSoundRef.current) playRemindSound(remindVolumeRef.current);
     hideGen.current += 1;
     window.clearTimeout(hideTimer.current);
     window.clearTimeout(hoverRevealTimer.current);
@@ -280,9 +328,16 @@ export default function App() {
       window.clearTimeout(remindTimer.current);
       stopHoverWatch();
       setRemind(null);
+      stowingRef.current = false;
+      stowSince.current = 0;
+      hiddenRef.current = false;
       setStowing(false);
       setHidden(false);
       setSettings((st) => (st ? { ...st, islandX: null, islandY: null } : st));
+      if (revealShouldRearm(autoHideRef.current, false)) {
+        idleSince.current = performance.now();
+        scheduleRef.current(HIDE_AFTER_MS);
+      }
     }).then((f) => unsubs.push(f));
     listen("preview-remind", () => {
       const sample = todayCoursesRef.current[0] || {
@@ -303,9 +358,10 @@ export default function App() {
     const onEnter = () => {
       hoveredRef.current = true;
       setHovered(true);
-      window.clearTimeout(hideTimer.current);
-      if (stowing) {
+      if (stowingRef.current) {
         hideGen.current += 1;
+        stowingRef.current = false;
+        stowSince.current = 0;
         setStowing(false);
       }
     };
@@ -319,7 +375,7 @@ export default function App() {
       root.removeEventListener("mouseenter", onEnter);
       root.removeEventListener("mouseleave", onLeave);
     };
-  }, [stowing]);
+  }, []);
 
   useEffect(() => {
     if (settings?.autoHide !== false) return;
@@ -332,13 +388,63 @@ export default function App() {
   }, [settings?.autoHide, hidden, stowing]);
 
   useEffect(() => {
-    window.clearTimeout(hideTimer.current);
-    if (!settings?.autoHide || hidden || stowing || remind || hovered || campusHint || silentLogin) return;
-    hideTimer.current = window.setTimeout(() => {
-      hideIsland();
-    }, 3000);
-    return () => window.clearTimeout(hideTimer.current);
-  }, [hidden, stowing, remind, hovered, campusHint, silentLogin, settings?.autoHide, hideIsland]);
+    let dead = false;
+    const arm = (ms: number) => {
+      window.clearTimeout(hideTimer.current);
+      if (dead) return;
+      hideTimer.current = window.setTimeout(tick, ms);
+    };
+    const tick = () => {
+      if (dead) return;
+      const now = performance.now();
+      if (stowingRef.current && stowSince.current && now - stowSince.current > 2000 && !hiddenRef.current) {
+        hideGen.current += 1;
+        stowingRef.current = false;
+        stowSince.current = 0;
+        setStowing(false);
+      }
+      const over = !!document.getElementById("root")?.matches(":hover");
+      hoveredRef.current = over;
+      const idleMs = idleSince.current ? now - idleSince.current : 0;
+      const decision = nextHideTick({
+        autoHide: autoHideRef.current,
+        hidden: hiddenRef.current,
+        hover: over,
+        remind: !!remindRef.current,
+        hint: !!campusHintRef.current,
+        login: silentLoginRef.current,
+        stowing: stowingRef.current,
+        idleMs,
+      });
+      if (decision.kind === "stop") return;
+      if (decision.kind === "wait") {
+        if (decision.resetIdle) idleSince.current = 0;
+        else if (!idleSince.current) idleSince.current = now;
+        arm(decision.ms);
+        return;
+      }
+      idleSince.current = 0;
+      void hideIsland().finally(() => {
+        if (dead || hiddenRef.current || !autoHideRef.current) return;
+        idleSince.current = performance.now();
+        arm(HIDE_AFTER_MS);
+      });
+    };
+    scheduleRef.current = (ms: number) => {
+      if (!autoHideRef.current) return;
+      idleSince.current = performance.now();
+      arm(ms);
+    };
+    if (settings?.autoHide && !hidden) {
+      idleSince.current = performance.now();
+      arm(HIDE_AFTER_MS);
+    }
+    return () => {
+      dead = true;
+      window.clearTimeout(hideTimer.current);
+      scheduleRef.current = () => undefined;
+    };
+  }, [settings?.autoHide, hidden, remind, campusHint, silentLogin, hideIsland]);
 
   useEffect(() => {
     if (!remind) return;

@@ -2,6 +2,7 @@ node_modules/
 dist/
 ui/dist/
 src-tauri/target/
+src-tauri/binaries/
 src-tauri/gen/
 tmp/
 .DS_Store
@@ -20,3 +21,4 @@ dev-now.txt
 .vscode/
 __pycache__/
 *.pyc
+src-tauri/meter/target/

@@ -12,6 +12,8 @@ mod periods;
 mod util;
 mod webvpn;
 mod desk_drop;
+mod meter_cmd;
+mod public_ip;
 mod share;
 mod wlan;
 
@@ -40,7 +42,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewWindow};
 use tokio::sync::Mutex as AsyncMutex;
@@ -58,13 +60,6 @@ pub struct AppState {
     /// 自动课表同步今天已经打过教务（不论成败）。手动刷新不受这一天限制。
     course_attempt_day: Mutex<Option<NaiveDate>>,
     data_dir: PathBuf,
-    tray_balances: Mutex<Option<TrayBalances>>,
-}
-
-struct TrayBalances {
-    card: MenuItem<tauri::Wry>,
-    net: MenuItem<tauri::Wry>,
-    elec: MenuItem<tauri::Wry>,
 }
 
 /// 23:00–06:00 电费系统经常连不上。这段时间失败就留缓存，不标同步失败。
@@ -228,24 +223,392 @@ fn tray_labels(snap: &Snapshot) -> (String, String, String) {
     (card, net, elec)
 }
 
-fn sync_tray(app: &AppHandle, snap: &Snapshot) {
-    let Some(state) = app.try_state::<AppState>() else {
-        return;
-    };
-    let guard = state.tray_balances.lock().unwrap();
-    let Some(t) = guard.as_ref() else {
-        return;
-    };
+fn format_rate(n: u64) -> String {
+    const MB: u64 = 1024 * 1024;
+    const KB: u64 = 1024;
+    if n >= MB {
+        format!("{:.1} MB/s", n as f64 / MB as f64)
+    } else if n >= KB {
+        format!("{} KB/s", (n as f64 / KB as f64).round() as u64)
+    } else {
+        format!("{n} B/s")
+    }
+}
+
+/// 悬停文字。`speeds` 只在流量记录开启时有值，两项是速度或「—」。
+fn compose_tray_tip(card: &str, net: &str, elec: &str, speeds: Option<(&str, &str)>) -> String {
+    let mut lines = vec![card.to_string(), net.to_string(), elec.to_string()];
+    if let Some((v4, v6)) = speeds {
+        lines.push(format!("IPv4  {v4}"));
+        lines.push(format!("IPv6  {v6}"));
+    }
+    let mut text = lines.join("\n");
+    if text.chars().count() > 127 {
+        text = text.chars().take(127).collect();
+    }
+    text
+}
+
+fn tray_tip(snap: &Snapshot) -> String {
     let (card, net, elec) = tray_labels(snap);
-    let _ = t.card.set_text(card);
-    let _ = t.net.set_text(net);
-    let _ = t.elec.set_text(elec);
+    let meter = nidong_meter::status();
+    let speeds = if meter.enabled {
+        if meter.running && meter.on_campus {
+            Some((format_rate(meter.v4_down_bps), format_rate(meter.v6_down_bps)))
+        } else {
+            Some(("—".to_string(), "—".to_string()))
+        }
+    } else {
+        None
+    };
+    match &speeds {
+        Some((v4, v6)) => compose_tray_tip(&card, &net, &elec, Some((v4, v6))),
+        None => compose_tray_tip(&card, &net, &elec, None),
+    }
+}
+
+fn sync_tray(app: &AppHandle, snap: &Snapshot) {
+    let text = tray_tip(snap);
+    static LAST: Mutex<String> = Mutex::new(String::new());
+    if LAST.lock().unwrap().as_str() == text {
+        return;
+    }
+    let Some(icon) = app.tray_by_id("tray") else {
+        return;
+    };
+    if icon.set_tooltip(Some(text.as_str())).is_ok() {
+        *LAST.lock().unwrap() = text;
+    }
 }
 
 fn emit_snapshot(app: &AppHandle, snap: &Snapshot) {
     sync_tray(app, snap);
     let _ = app.emit("snapshot-updated", snap);
 }
+
+fn version_parts(v: &str) -> Vec<u64> {
+    v.split(|c: char| c != '.' && !c.is_ascii_digit())
+        .next()
+        .unwrap_or(v)
+        .split('.')
+        .filter_map(|p| p.parse().ok())
+        .collect()
+}
+
+fn is_dev_exe(path: &str) -> bool {
+    let text = path.to_ascii_lowercase();
+    text.contains("\\target\\debug\\") || text.contains("\\target\\release\\")
+}
+
+/// 另一份 nidong.exe 占着单实例时，注册表里的正式包要把它关掉。
+/// 开发目录和同一安装目录不动。
+#[cfg(windows)]
+fn other_copy_should_exit(current: &std::path::Path, other: &str) -> bool {
+    let other_path = std::path::Path::new(other);
+    let Some(name) = other_path.file_name() else {
+        return false;
+    };
+    if !name.eq_ignore_ascii_case("nidong.exe") {
+        return false;
+    }
+    if is_dev_exe(other) {
+        return false;
+    }
+    let Some(current_dir) = current.parent() else {
+        return false;
+    };
+    let Some(other_dir) = other_path.parent() else {
+        return false;
+    };
+    !same_dir(current_dir, other_dir)
+}
+
+fn version_gt(left: &str, right: &str) -> bool {
+    let left = version_parts(left);
+    let right = version_parts(right);
+    let n = left.len().max(right.len());
+    for i in 0..n {
+        let a = left.get(i).copied().unwrap_or(0);
+        let b = right.get(i).copied().unwrap_or(0);
+        if a != b {
+            return a > b;
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod version_cmp_tests {
+    use super::version_gt;
+
+    #[test]
+    fn newer_install_is_greater() {
+        assert!(version_gt("2.3.1", "2.1.0"));
+        assert!(!version_gt("2.3.1", "2.3.1"));
+        assert!(!version_gt("2.3.1.0", "2.3.1"));
+        assert!(version_gt("2.3.3", "2.3.1"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn stale_copy_is_evicted_dev_copy_is_not() {
+        let install = std::path::Path::new(r"C:\Users\asus\AppData\Local\泥洞\nidong.exe");
+        assert!(super::other_copy_should_exit(install, r"D:\泥洞\nidong.exe"));
+        assert!(!super::other_copy_should_exit(
+            install,
+            r"D:\nidong\src-tauri\target\debug\nidong.exe"
+        ));
+        assert!(!super::other_copy_should_exit(
+            install,
+            r"D:\nidong\src-tauri\target\release\nidong.exe"
+        ));
+        assert!(!super::other_copy_should_exit(
+            install,
+            r"C:\Users\asus\AppData\Local\泥洞\nidong.exe"
+        ));
+        assert!(!super::other_copy_should_exit(
+            install,
+            r"D:\泥洞\nidong-meter.exe"
+        ));
+    }
+}
+
+#[cfg(windows)]
+fn reg_sz(subkey: &str, value: Option<&str>) -> Option<String> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_SZ, RegGetValueW};
+
+    let sub: Vec<u16> = std::ffi::OsStr::new(subkey)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let owned: Vec<u16>;
+    let val = match value {
+        Some(name) => {
+            owned = std::ffi::OsStr::new(name)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            PCWSTR(owned.as_ptr())
+        }
+        None => PCWSTR::null(),
+    };
+    let mut bytes = 0u32;
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            PCWSTR(sub.as_ptr()),
+            val,
+            RRF_RT_REG_SZ,
+            None,
+            None,
+            Some(&mut bytes),
+        )
+    };
+    if rc != ERROR_SUCCESS || bytes < 4 {
+        return None;
+    }
+    let mut buf = vec![0u16; bytes as usize / 2 + 1];
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            PCWSTR(sub.as_ptr()),
+            val,
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr() as *mut _),
+            Some(&mut bytes),
+        )
+    };
+    if rc != ERROR_SUCCESS {
+        return None;
+    }
+    let n = (bytes as usize / 2).saturating_sub(1);
+    let text = std::ffi::OsString::from_wide(&buf[..n])
+        .to_string_lossy()
+        .trim()
+        .trim_matches('"')
+        .to_string();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+#[cfg(windows)]
+fn same_dir(a: &std::path::Path, b: &std::path::Path) -> bool {
+    let norm = |p: &std::path::Path| {
+        p.canonicalize()
+            .unwrap_or_else(|_| p.to_path_buf())
+            .to_string_lossy()
+            .trim_end_matches(['\\', '/'])
+            .to_ascii_lowercase()
+    };
+    norm(a) == norm(b)
+}
+
+/// 注册表里的安装比当前这个 exe 新时，改去打开那一份。
+/// 开发构建和 target 目录里的程序不跳。单实例锁还没建，可以直接拉起。
+#[cfg(windows)]
+fn handoff_newer_install() -> bool {
+    if cfg!(debug_assertions) {
+        return false;
+    }
+    let Ok(current) = std::env::current_exe() else {
+        return false;
+    };
+    let text = current.to_string_lossy().to_ascii_lowercase();
+    if text.contains("\\target\\debug\\") || text.contains("\\target\\release\\") {
+        return false;
+    }
+    let Some(current_dir) = current.parent() else {
+        return false;
+    };
+    let Some(install_dir) = reg_sz(r"Software\sapphire_fic\泥洞", None) else {
+        return false;
+    };
+    let install_dir = std::path::PathBuf::from(install_dir);
+    if same_dir(current_dir, &install_dir) {
+        return false;
+    }
+    let installed = install_dir.join("nidong.exe");
+    if !installed.is_file() {
+        return false;
+    }
+    let Some(installed_ver) = reg_sz(
+        r"Software\Microsoft\Windows\CurrentVersion\Uninstall\泥洞",
+        Some("DisplayVersion"),
+    ) else {
+        return false;
+    };
+    if !version_gt(&installed_ver, env!("CARGO_PKG_VERSION")) {
+        return false;
+    }
+    let _ = std::process::Command::new(&installed).spawn();
+    true
+}
+
+#[cfg(not(windows))]
+fn handoff_newer_install() -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn exe_name_is_nidong(sz: &[u16]) -> bool {
+    let end = sz.iter().position(|&c| c == 0).unwrap_or(sz.len());
+    String::from_utf16_lossy(&sz[..end]).eq_ignore_ascii_case("nidong.exe")
+}
+
+#[cfg(windows)]
+fn nidong_pids() -> Vec<u32> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    let mut out = Vec::new();
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return out;
+        };
+        let mut entry = PROCESSENTRY32W::default();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        if Process32FirstW(snap, &mut entry).is_ok() {
+            loop {
+                if exe_name_is_nidong(&entry.szExeFile) {
+                    out.push(entry.th32ProcessID);
+                }
+                if Process32NextW(snap, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+        let _ = CloseHandle(snap);
+    }
+    out
+}
+
+#[cfg(windows)]
+fn process_image_path(pid: u32) -> Option<String> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::core::PWSTR;
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buf = vec![0u16; 1024];
+        let mut len = buf.len() as u32;
+        let queried = QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_WIN32,
+            PWSTR(buf.as_mut_ptr()),
+            &mut len,
+        );
+        let _ = CloseHandle(handle);
+        queried.ok()?;
+        let text = String::from_utf16_lossy(&buf[..len as usize]);
+        if text.is_empty() { None } else { Some(text) }
+    }
+}
+
+#[cfg(windows)]
+fn terminate_pid(pid: u32) {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+    };
+
+    unsafe {
+        let Ok(handle) = OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, false, pid) else {
+            return;
+        };
+        let _ = TerminateProcess(handle, 0);
+        let _ = WaitForSingleObject(handle, 3000);
+        let _ = CloseHandle(handle);
+    }
+}
+
+/// 自己就是注册表里的正式包时，先关掉其他目录的 nidong.exe。
+/// 否则旧托盘占着单实例，新启动的关于页仍是旧版本。
+#[cfg(windows)]
+fn evict_other_copies() {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    let Ok(current) = std::env::current_exe() else {
+        return;
+    };
+    if is_dev_exe(&current.to_string_lossy()) {
+        return;
+    }
+    let Some(current_dir) = current.parent() else {
+        return;
+    };
+    let Some(install_dir) = reg_sz(r"Software\sapphire_fic\泥洞", None) else {
+        return;
+    };
+    if !same_dir(current_dir, std::path::Path::new(&install_dir)) {
+        return;
+    }
+    let me = std::process::id();
+    for pid in nidong_pids() {
+        if pid == me {
+            continue;
+        }
+        let Some(path) = process_image_path(pid) else {
+            continue;
+        };
+        if other_copy_should_exit(&current, &path) {
+            terminate_pid(pid);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn evict_other_copies() {}
 
 fn apply_autostart(enable: bool) -> Result<()> {
     if cfg!(debug_assertions) {
@@ -457,6 +820,7 @@ fn save_settings(app: AppHandle, state: State<AppState>, mut settings: AppSettin
                 }
             }
         }
+        settings.remind_volume = settings.remind_volume.min(100);
         crate::hotkey::update(&settings);
         apply_autostart(settings.autostart)?;
         *g = settings.clone();
@@ -1346,6 +1710,10 @@ async fn resume_session(app: AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if handoff_newer_install() {
+        return;
+    }
+    evict_other_copies();
     let mut builder = tauri::Builder::default();
     builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
         reveal_running_instance(app);
@@ -1399,7 +1767,6 @@ pub fn run() {
                 refresh_gate: AsyncMutex::new(()),
                 course_attempt_day: Mutex::new(None),
                 data_dir: data_dir.clone(),
-                tray_balances: Mutex::new(None),
             });
 
             if let Some(win) = app.get_webview_window("main") {
@@ -1485,32 +1852,18 @@ pub fn run() {
             }
 
             let snap_now = app.state::<AppState>().snapshot.lock().unwrap().clone();
-            let (card_t, net_t, elec_t) = tray_labels(&snap_now);
-            let card = MenuItem::with_id(app, "bal-card", card_t, true, None::<&str>)?;
-            let net = MenuItem::with_id(app, "bal-net", net_t, true, None::<&str>)?;
-            let elec = MenuItem::with_id(app, "bal-elec", elec_t, true, None::<&str>)?;
             let open = MenuItem::with_id(app, "open", "打开窗口", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let reset = MenuItem::with_id(app, "reset", "复位岛", true, None::<&str>)?;
             let refresh = MenuItem::with_id(app, "refresh", "刷新", true, None::<&str>)?;
-            let sep = PredefinedMenuItem::separator(app)?;
             let menu = Menu::new(app)?;
-            menu.append(&card)?;
-            menu.append(&net)?;
-            menu.append(&elec)?;
-            menu.append(&sep)?;
             menu.append(&open)?;
             menu.append(&refresh)?;
             menu.append(&reset)?;
             menu.append(&quit)?;
-            *app.state::<AppState>().tray_balances.lock().unwrap() = Some(TrayBalances {
-                card: card.clone(),
-                net: net.clone(),
-                elec: elec.clone(),
-            });
-            let mut tray = TrayIconBuilder::new()
+            let mut tray = TrayIconBuilder::with_id("tray")
                 .menu(&menu)
-                .tooltip("泥洞")
+                .tooltip(tray_tip(&snap_now))
                 .show_menu_on_left_click(false)
                 .on_tray_icon_event(|icon, event| {
                     if let TrayIconEvent::Click {
@@ -1564,6 +1917,18 @@ pub fn run() {
                     _ => {}
                 })
                 .build(app)?;
+            sync_tray(app.handle(), &snap_now);
+            let tip_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    let Some(state) = tip_app.try_state::<AppState>() else {
+                        break;
+                    };
+                    let snap = state.snapshot.lock().unwrap().clone();
+                    sync_tray(&tip_app, &snap);
+                }
+            });
             campus::spawn(app.handle().clone());
             Ok(())
         })
@@ -1600,7 +1965,13 @@ pub fn run() {
             share::share_stop,
             share::share_offer,
             share::share_revise,
-            share::share_on_campus
+            share::share_on_campus,
+            meter_cmd::meter_status,
+            public_ip::public_ipv4,
+            meter_cmd::meter_log,
+            meter_cmd::meter_enable,
+            meter_cmd::meter_disable,
+            meter_cmd::meter_open_log
         ])
         .run(tauri::generate_context!())
         .expect("泥洞启动失败");
@@ -1608,7 +1979,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{elec_night, settle_elec, ElecInfo};
+    use super::{compose_tray_tip, elec_night, format_rate, settle_elec, ElecInfo};
 
     #[test]
     fn elec_quiet_hours_are_23_to_6() {
@@ -1672,5 +2043,40 @@ mod tests {
         settle_elec(&mut elec, &mut err, "3520101", true, "查电费失败");
         assert!(elec.is_none());
         assert!(err.is_some());
+    }
+
+    #[test]
+    fn rate_matches_the_page() {
+        assert_eq!(format_rate(0), "0 B/s");
+        assert_eq!(format_rate(1023), "1023 B/s");
+        assert_eq!(format_rate(1024), "1 KB/s");
+        assert_eq!(format_rate(1536), "2 KB/s");
+        assert_eq!(format_rate(1024 * 1024 - 1), "1024 KB/s");
+        assert_eq!(format_rate(1024 * 1024), "1.0 MB/s");
+    }
+
+    #[test]
+    fn tray_tip_keeps_balances_and_adds_speeds_only_when_asked() {
+        let plain = compose_tray_tip("校园卡  1.00 元", "网费  2.00 元", "电费  3 度", None);
+        assert_eq!(plain, "校园卡  1.00 元\n网费  2.00 元\n电费  3 度");
+        assert!(!plain.contains("校外"));
+        assert!(!plain.contains("IPv4"));
+        let live = compose_tray_tip(
+            "校园卡  1.00 元",
+            "网费  2.00 元",
+            "电费  3 度",
+            Some(("12 KB/s", "0 B/s")),
+        );
+        assert_eq!(
+            live,
+            "校园卡  1.00 元\n网费  2.00 元\n电费  3 度\nIPv4  12 KB/s\nIPv6  0 B/s"
+        );
+        assert!(!live.contains("校外"));
+        let missing = compose_tray_tip("校园卡  —", "网费  —", "电费  —", Some(("—", "—")));
+        assert!(missing.contains("IPv4  —"));
+        assert!(missing.contains("IPv6  —"));
+        assert!(missing.chars().count() <= 127);
+        let long = compose_tray_tip(&"卡".repeat(80), &"网".repeat(80), "电费  1 度", None);
+        assert_eq!(long.chars().count(), 127);
     }
 }
