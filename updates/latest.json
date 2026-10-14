@@ -1,11 +1,11 @@
 {
-  "version": "2.3.5",
-  "notes": "test version",
-  "pub_date": "2026-10-14T02:44:11Z",
+  "version": "2.3.6",
+  "notes": "new version",
+  "pub_date": "2026-10-14T10:48:09Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZHhud3BvazNha00wdCtiYlQ1S1hSSitYNkpFYnVTb1pDYm5jY3FFbkZ2emphS3FWeGxhMjBGUHAzWms1UDlhbG5Wak05MmZvTG55TkxYYWNtMzBndlE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxOTQ1ODUwCWZpbGU65rOl5rSeXzIuMy41X3g2NC1zZXR1cC5leGUKS0VJNFJFRG1OaCtQREt1cnpxWDhxRTdzVlNUUHBwdk5oOVk4TTRRcHVRY2xpWFVySXlQaVMwcWpQaTYzNU9jeTQ4UG5VcWU1SHBuSzNDOEhQUEFhQXc9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.3.5_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZCswalYxVGJxRThQWXFMRlR4QzB1cFFQdjRIWnhZeEREdWhVQmFWUXJ4TTlCUU1UZCtPS0R1ZUpRUTVwZVN1a0UwMi9tcEliZzFLRDhUMVNFa25Mc0E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxOTc0ODg4CWZpbGU65rOl5rSeXzIuMy42X3g2NC1zZXR1cC5leGUKVWRkOHdwd2gvMnpmTXVEZG1acWpiL1dKMGlxdzBkcTFiTFBieTYyb1VzZWpxc2hMUW9WT2MvZFAxL0dtRmVPcEo1Y05ZSnZ4aUtNWFV1VFRVbDVvQ2c9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.3.6_x64-setup.exe"
     }
   }
 }
