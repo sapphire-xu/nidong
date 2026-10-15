@@ -5,6 +5,7 @@ mod run;
 mod sample;
 mod store;
 mod task;
+mod udp;
 
 use serde::Serialize;
 
@@ -24,6 +25,8 @@ pub struct Status {
     pub v6_down_bps: u64,
     pub night: bool,
     pub elevated: bool,
+    pub udp_ready: bool,
+    pub udp_gap: bool,
     pub today: Option<Totals>,
     pub month: Option<Totals>,
     pub error: String,
@@ -60,6 +63,8 @@ pub fn status() -> Status {
             v6_down_bps: live.v6_down_bps,
             night: live.night,
             elevated: live.elevated,
+            udp_ready: live.udp_ready,
+            udp_gap: live.udp_gap,
             today: today_tot,
             month: month_tot,
             error,
@@ -74,6 +79,8 @@ pub fn status() -> Status {
             v6_down_bps: 0,
             night: false,
             elevated: false,
+            udp_ready: false,
+            udp_gap: false,
             today: today_tot,
             month: month_tot,
             error,

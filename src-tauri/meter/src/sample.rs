@@ -1,4 +1,5 @@
-//! 读 Windows 每条 TCP 连接的收发字节。UDP 没有按连接的字节计数，不记。
+//! TCP 连接计数，只在内核事件会话没接上、或这一轮事件丢了时补 TCP。
+//! 短连接会在两次采样之间结束，这里看不见。
 
 use std::collections::HashMap;
 
@@ -289,7 +290,7 @@ pub fn ipv4_is_local(o: [u8; 4]) -> bool {
         || a >= 224
 }
 
-fn v6_is_global(addr: &[u8; 16]) -> bool {
+pub(crate) fn v6_is_global(addr: &[u8; 16]) -> bool {
     if *addr == [0u8; 16] || addr[0] == 0xff {
         return false;
     }

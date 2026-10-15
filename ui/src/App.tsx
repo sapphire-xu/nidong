@@ -1,17 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { upcomingAgenda } from "./agenda";
 import { upcomingCourse } from "./course";
-import { HIDE_AFTER_MS, nextHideTick, revealShouldRearm } from "./autoHide";
+import { HIDE_AFTER_MS, HIDE_POLL_MS, shouldResetIdle, stepHide, type HidePhase } from "./autoHide";
 import { deriveDay } from "./dayModel";
 import { fmtMoney, ymd } from "./format";
 import { clampVolume, resolveTheme, withSettingDefaults } from "./prefs";
 import type { AppSettings, Course, Snapshot } from "./types";
 import { useClock } from "./useClock";
-
-const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
 
 let remindAudio: HTMLAudioElement | null = null;
 function playRemindSound(volume: number) {
@@ -51,12 +49,10 @@ export default function App() {
   const dragRaf = useRef(0);
   const dragPending = useRef<{ x: number; y: number } | null>(null);
   const hoveredRef = useRef(false);
-  const hiddenRef = useRef(false);
   const remindRef = useRef<Remind | null>(null);
   const autoHideRef = useRef(false);
   const autoHideHoverRef = useRef(false);
   const hideGen = useRef(0);
-  const hideTimer = useRef(0);
   const remindTimer = useRef(0);
   const hoverRevealTimer = useRef(0);
   const preRemindRef = useRef<{ hidden: boolean } | null>(null);
@@ -64,11 +60,19 @@ export default function App() {
   const startRemindRef = useRef<(c: Course & { kind?: "class" | "event" }) => void>(() => undefined);
   const remindSoundRef = useRef(false);
   const remindVolumeRef = useRef(1);
-  const revealIslandRef = useRef<() => void>(() => undefined);
-  const scheduleRef = useRef<(ms: number) => void>(() => undefined);
+  const revealRef = useRef<() => void>(() => undefined);
+  const armHideRef = useRef<() => void>(() => undefined);
+  const cancelStowRef = useRef<() => void>(() => undefined);
+  const tickRef = useRef<() => void>(() => undefined);
+  const hideFsRef = useRef<() => void>(() => undefined);
+  const phaseRef = useRef<HidePhase>("shown");
   const idleSince = useRef(0);
   const stowSince = useRef(0);
-  const stowingRef = useRef(false);
+  const closingRef = useRef(false);
+  const busyRef = useRef(false);
+  const sawReadyRef = useRef(false);
+  const prevAutoHideRef = useRef<boolean | null>(null);
+  const settingsRef = useRef<AppSettings | null>(null);
   const gameFsRef = useRef(false);
   const hiddenBeforeFs = useRef(false);
   const openingDeskRef = useRef(false);
@@ -77,14 +81,12 @@ export default function App() {
   const silentLoginRef = useRef(false);
   const preHintHidden = useRef(false);
   const hintTimer = useRef(0);
-  const hideIslandRef = useRef<() => void>(() => undefined);
 
   const theme = resolveTheme(settings?.theme);
   const loggedIn = !!snap?.loggedIn;
-  hiddenRef.current = hidden;
+  settingsRef.current = settings;
   remindRef.current = remind;
-  stowingRef.current = stowing;
-  autoHideRef.current = !!settings?.autoHide;
+  autoHideRef.current = !!settings && settings.autoHide !== false;
   autoHideHoverRef.current = !!settings?.autoHideHover;
   silentLoginRef.current = silentLogin;
 
@@ -108,28 +110,80 @@ export default function App() {
     api.settings().then((s) => setSettings(withSettingDefaults(s))).catch(() => undefined);
   }, []);
 
-  const abortStow = (gen: number) => {
-    if (hideGen.current !== gen) return;
-    stowingRef.current = false;
-    stowSince.current = 0;
-    setStowing(false);
+  const paint = (phase: HidePhase) => {
+    phaseRef.current = phase;
+    if (phase !== "stowing") stowSince.current = 0;
+    const stow = phase === "stowing";
+    const hid = phase === "hidden";
+    setStowing((v) => (v === stow ? v : stow));
+    setHidden((v) => (v === hid ? v : hid));
   };
 
-  const hideIsland = useCallback(async () => {
-    if (!autoHideRef.current || remindRef.current || campusHintRef.current || silentLoginRef.current || hiddenRef.current) return;
-    if (gameFsRef.current || document.getElementById("root")?.matches(":hover")) return;
+  const showIsland = () => {
+    void api.raiseTopmost().catch(() => {
+      void getCurrentWindow().show().catch(() => undefined);
+    });
+  };
+
+  const pointerOnIsland = () => !!document.getElementById("root")?.matches(":hover") || draggingRef.current;
+
+  const reveal = () => {
+    hideGen.current += 1;
+    closingRef.current = false;
+    paint("shown");
+    idleSince.current = performance.now();
+    void stopHoverWatch();
+    showIsland();
+  };
+
+  // 原先是藏着的：这一轮直接折，不再另等 3 秒。指针还在岛上时，巡检会把这一下抹掉并重新计时。
+  const armHide = () => {
+    if (phaseRef.current === "hidden" || gameFsRef.current) return;
+    idleSince.current = performance.now() - HIDE_AFTER_MS - HIDE_POLL_MS;
+  };
+
+  const cancelStow = () => {
+    idleSince.current = performance.now();
+    if (phaseRef.current !== "stowing" && !closingRef.current) return;
+    hideGen.current += 1;
+    closingRef.current = false;
+    paint("shown");
+    void stopHoverWatch();
+  };
+
+  const finishHide = async () => {
     const gen = ++hideGen.current;
-    stowingRef.current = true;
-    stowSince.current = performance.now();
-    setStowing(true);
-    await sleep(320);
-    // 折叠途中如果来了校园网提示或同步文案，reveal 会把这一代作废。
-    // 位置查询也是 await。作废之后不能再 hide()，否则动画被掐掉，窗口直接没了。
-    const cancelled = () =>
-      hideGen.current !== gen || !!remindRef.current || gameFsRef.current || !!campusHintRef.current || silentLoginRef.current
-      || !!document.getElementById("root")?.matches(":hover");
-    if (cancelled()) {
-      abortStow(gen);
+    closingRef.current = true;
+    const dropped = () =>
+      hideGen.current !== gen
+      || !!remindRef.current
+      || !!campusHintRef.current
+      || silentLoginRef.current
+      || gameFsRef.current
+      || !autoHideRef.current
+      || pointerOnIsland();
+    // 折叠类名清掉之后不能再把窗口留在隐藏。全屏自己负责藏，这里不要把它叫回来。
+    const undoHide = () => {
+      closingRef.current = false;
+      if (gameFsRef.current) return;
+      paint("shown");
+      idleSince.current = performance.now();
+      void stopHoverWatch();
+      showIsland();
+    };
+    const keepShown = () => {
+      if (gameFsRef.current) {
+        closingRef.current = false;
+        return;
+      }
+      if (hideGen.current !== gen && phaseRef.current !== "stowing") return;
+      closingRef.current = false;
+      paint("shown");
+      idleSince.current = performance.now();
+      void stopHoverWatch();
+    };
+    if (dropped()) {
+      keepShown();
       return;
     }
     const w = getCurrentWindow();
@@ -137,8 +191,8 @@ export default function App() {
       if (autoHideHoverRef.current) {
         const pos = await w.outerPosition();
         const size = await w.outerSize();
-        if (cancelled()) {
-          abortStow(gen);
+        if (dropped()) {
+          keepShown();
           return;
         }
         const pad = 24;
@@ -152,103 +206,176 @@ export default function App() {
       } else {
         await stopHoverWatch();
       }
-      if (cancelled()) {
-        abortStow(gen);
+      if (dropped()) {
+        keepShown();
         return;
       }
-      hiddenRef.current = true;
-      setHidden(true);
       await w.hide();
-      // hide() 返回时，提示可能已经把折叠类名清掉。这时再留着隐藏，岛就是直接没了。
-      if (cancelled()) {
-        hiddenRef.current = false;
-        stowingRef.current = false;
+      if (gameFsRef.current && hideGen.current === gen) {
+        closingRef.current = false;
+        phaseRef.current = "hidden";
         stowSince.current = 0;
-        setHidden(false);
         setStowing(false);
-        try {
-          await api.raiseTopmost();
-        } catch {
-          try {
-            await getCurrentWindow().show();
-          } catch {
-            /* ignore */
-          }
-        }
+        setHidden(true);
+        return;
       }
+      if (dropped() || pointerOnIsland()) {
+        undoHide();
+        return;
+      }
+      closingRef.current = false;
+      paint("hidden");
     } catch {
-      if (hideGen.current === gen) {
-        hiddenRef.current = false;
-        setHidden(false);
-        abortStow(gen);
-      }
+      undoHide();
     }
-  }, []);
+  };
 
-  const revealIsland = useCallback(async () => {
-    hideGen.current += 1;
-    window.clearTimeout(hideTimer.current);
-    window.clearTimeout(hoverRevealTimer.current);
-    stowingRef.current = false;
+  const hideForFullscreen = async () => {
+    const gen = ++hideGen.current;
+    closingRef.current = true;
+    phaseRef.current = "hidden";
     stowSince.current = 0;
-    hiddenRef.current = false;
-    setStowing(false);
-    setHidden(false);
-    await stopHoverWatch();
     try {
-      await api.raiseTopmost();
+      await getCurrentWindow().hide();
     } catch {
-      try {
-        await getCurrentWindow().show();
-      } catch {
-        /* ignore */
+      if (hideGen.current !== gen) return;
+      closingRef.current = false;
+      if (!gameFsRef.current) paint("shown");
+      return;
+    }
+    if (hideGen.current !== gen) {
+      closingRef.current = false;
+      if (!gameFsRef.current) showIsland();
+      return;
+    }
+    closingRef.current = false;
+    setStowing(false);
+    setHidden(true);
+  };
+
+  const tick = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    try {
+      let now = performance.now();
+      if (closingRef.current && stowSince.current && now - stowSince.current > 3000 && !gameFsRef.current) {
+        hideGen.current += 1;
+        closingRef.current = false;
+        paint("shown");
+        idleSince.current = now;
+        showIsland();
       }
+      const ready = settingsRef.current !== null;
+      const autoHide = ready && settingsRef.current?.autoHide !== false;
+      if (shouldResetIdle(sawReadyRef.current, prevAutoHideRef.current, ready, autoHide)) {
+        idleSince.current = now;
+      }
+      if (ready) {
+        sawReadyRef.current = true;
+        prevAutoHideRef.current = autoHide;
+      }
+      let windowVisible = phaseRef.current !== "hidden";
+      if (phaseRef.current === "hidden" || gameFsRef.current) {
+        try {
+          windowVisible = await getCurrentWindow().isVisible();
+        } catch {
+          windowVisible = true;
+        }
+        now = performance.now();
+      }
+      const hover = pointerOnIsland();
+      hoveredRef.current = hover;
+      const step = stepHide({
+        ready,
+        autoHide,
+        phase: phaseRef.current,
+        windowVisible,
+        hover,
+        remind: !!remindRef.current,
+        hint: !!campusHintRef.current,
+        login: silentLoginRef.current,
+        fullscreen: gameFsRef.current,
+        closing: closingRef.current,
+        idleMs: idleSince.current ? now - idleSince.current : 0,
+        stowMs: stowSince.current ? now - stowSince.current : 0,
+      });
+      if (step.kind === "wait") {
+        if (step.resetIdle) idleSince.current = now;
+        else if (!idleSince.current && ready && phaseRef.current === "shown" && !gameFsRef.current) idleSince.current = now;
+        return;
+      }
+      if (step.kind === "begin-stow") {
+        stowSince.current = now;
+        paint("stowing");
+        return;
+      }
+      if (step.kind === "cancel-stow") {
+        hideGen.current += 1;
+        closingRef.current = false;
+        paint("shown");
+        idleSince.current = now;
+        void stopHoverWatch();
+        return;
+      }
+      if (step.kind === "sync-shown") {
+        hideGen.current += 1;
+        closingRef.current = false;
+        paint("shown");
+        idleSince.current = now;
+        void stopHoverWatch();
+        return;
+      }
+      if (step.kind === "show") {
+        hideGen.current += 1;
+        closingRef.current = false;
+        paint("shown");
+        idleSince.current = now;
+        void stopHoverWatch();
+        showIsland();
+        return;
+      }
+      if (step.kind === "fullscreen-hide") {
+        void hideForFullscreen();
+        return;
+      }
+      if (step.kind === "finish-hide") void finishHide();
+    } finally {
+      busyRef.current = false;
     }
-    // 岛本来就露着时，hidden 不变，上面的效果不会重跑。这里必须自己把 3 秒排回去。
-    if (revealShouldRearm(autoHideRef.current, hiddenRef.current)) {
-      idleSince.current = performance.now();
-      scheduleRef.current(HIDE_AFTER_MS);
-    }
-  }, []);
+  };
+
+  revealRef.current = reveal;
+  armHideRef.current = armHide;
+  cancelStowRef.current = cancelStow;
+  tickRef.current = () => { void tick(); };
+  hideFsRef.current = () => { void hideForFullscreen(); };
 
   remindSoundRef.current = settings?.remindSound === true;
   remindVolumeRef.current = clampVolume(settings?.remindVolume) / 100;
 
-  const startRemind = useCallback(async (course: Course & { kind?: "class" | "event" }) => {
+  const startRemind = (course: Course & { kind?: "class" | "event" }) => {
     if (remindSoundRef.current) playRemindSound(remindVolumeRef.current);
-    hideGen.current += 1;
-    window.clearTimeout(hideTimer.current);
-    window.clearTimeout(hoverRevealTimer.current);
-    preRemindRef.current = { hidden: hiddenRef.current };
-    setStowing(false);
-    setHidden(false);
-    await stopHoverWatch();
-    try {
-      await api.raiseTopmost();
-    } catch {
-      try {
-        await getCurrentWindow().show();
-      } catch {
-        /* ignore */
-      }
-    }
-    setRemind({ name: course.name, start: course.start, kind: course.kind || "class" });
+    const next = { name: course.name, start: course.start, kind: course.kind || "class" as const };
+    const wasHidden = phaseRef.current === "hidden";
+    remindRef.current = next;
+    preRemindRef.current = { hidden: wasHidden };
+    reveal();
+    setRemind(next);
     window.clearTimeout(remindTimer.current);
     remindTimer.current = window.setTimeout(() => {
-      const pre = preRemindRef.current;
+      remindRef.current = null;
+      preRemindRef.current = null;
       setRemind(null);
-      if (pre?.hidden && autoHideRef.current) hideIsland();
+      if (wasHidden && autoHideRef.current) armHideRef.current();
     }, 10000);
-  }, [hideIsland]);
-
-  revealIslandRef.current = revealIsland;
+  };
   startRemindRef.current = startRemind;
-  hideIslandRef.current = () => { void hideIsland(); };
 
   useEffect(() => {
     const unsubs: Array<() => void> = [];
     listen<Snapshot>("snapshot-updated", (e) => {
       setSnap(e.payload);
+      silentLoginRef.current = false;
       setSilentLogin(false);
       setRefreshUi((u) => (u === "spin" ? "ok" : u));
     }).then((f) => unsubs.push(f));
@@ -258,15 +385,19 @@ export default function App() {
     listen<string>("auth-status", (e) => {
       const p = e.payload;
       if (p === "logging") {
+        silentLoginRef.current = true;
         setSilentLogin(true);
         setRefreshUi("idle");
       } else if (p === "syncing") {
+        silentLoginRef.current = true;
         setSilentLogin(true);
         setRefreshUi("spin");
       } else if (p === "ok" || p === "idle" || p === "need_sms") {
+        silentLoginRef.current = false;
         setSilentLogin(false);
         if (p !== "ok") setRefreshUi("idle");
       } else if (typeof p === "string" && p.startsWith("fail:")) {
+        silentLoginRef.current = false;
         setSilentLogin(false);
         setRefreshUi("idle");
       }
@@ -279,65 +410,53 @@ export default function App() {
         setCampusHint("");
         return;
       }
-      if (!campusHintRef.current) preHintHidden.current = hiddenRef.current;
+      if (!campusHintRef.current) preHintHidden.current = phaseRef.current === "hidden";
       campusHintRef.current = text;
       setCampusHint(text);
-      if (!gameFsRef.current) revealIslandRef.current();
+      if (!gameFsRef.current) revealRef.current();
       if (!text.startsWith("正在")) {
         hintTimer.current = window.setTimeout(() => {
           campusHintRef.current = "";
           setCampusHint("");
-          if (preHintHidden.current && autoHideRef.current && !hoveredRef.current) hideIslandRef.current();
+          if (preHintHidden.current && autoHideRef.current) armHideRef.current();
         }, 4000);
       }
     }).then((f) => unsubs.push(f));
     listen("island-reveal", () => {
-      revealIslandRef.current();
+      revealRef.current();
     }).then((f) => unsubs.push(f));
     listen("hotkey-reveal", () => {
       if (gameFsRef.current) return;
-      revealIslandRef.current();
+      revealRef.current();
     }).then((f) => unsubs.push(f));
     listen<boolean>("exclusive-fullscreen", (e) => {
       const on = !!e.payload;
-      gameFsRef.current = on;
       if (on) {
-        hiddenBeforeFs.current = hiddenRef.current;
-        getCurrentWindow().hide().catch(() => undefined);
+        hiddenBeforeFs.current = phaseRef.current === "hidden";
+        gameFsRef.current = true;
+        hideFsRef.current();
         return;
       }
-      if (!hiddenBeforeFs.current) {
-        setHidden(false);
-        setStowing(false);
-        api.raiseTopmost().catch(() => undefined);
-      }
+      gameFsRef.current = false;
+      if (!hiddenBeforeFs.current) revealRef.current();
     }).then((f) => unsubs.push(f));
     listen<boolean>("hover-zone", (e) => {
       window.clearTimeout(hoverRevealTimer.current);
       if (!e.payload || gameFsRef.current) return;
-      if (!hiddenRef.current || !autoHideHoverRef.current) return;
+      if (phaseRef.current !== "hidden" || !autoHideHoverRef.current) return;
       hoverRevealTimer.current = window.setTimeout(() => {
-        if (!hiddenRef.current || !autoHideHoverRef.current || gameFsRef.current) return;
-        revealIslandRef.current();
+        if (phaseRef.current !== "hidden" || !autoHideHoverRef.current || gameFsRef.current) return;
+        revealRef.current();
       }, 1000);
     }).then((f) => unsubs.push(f));
     listen("island-reset", () => {
-      hideGen.current += 1;
-      window.clearTimeout(hideTimer.current);
       window.clearTimeout(hoverRevealTimer.current);
       window.clearTimeout(remindTimer.current);
-      stopHoverWatch();
+      remindRef.current = null;
+      preRemindRef.current = null;
       setRemind(null);
-      stowingRef.current = false;
-      stowSince.current = 0;
-      hiddenRef.current = false;
-      setStowing(false);
-      setHidden(false);
+      revealRef.current();
       setSettings((st) => (st ? { ...st, islandX: null, islandY: null } : st));
-      if (revealShouldRearm(autoHideRef.current, false)) {
-        idleSince.current = performance.now();
-        scheduleRef.current(HIDE_AFTER_MS);
-      }
     }).then((f) => unsubs.push(f));
     listen("preview-remind", () => {
       const sample = todayCoursesRef.current[0] || {
@@ -358,12 +477,7 @@ export default function App() {
     const onEnter = () => {
       hoveredRef.current = true;
       setHovered(true);
-      if (stowingRef.current) {
-        hideGen.current += 1;
-        stowingRef.current = false;
-        stowSince.current = 0;
-        setStowing(false);
-      }
+      cancelStowRef.current();
     };
     const onLeave = () => {
       hoveredRef.current = false;
@@ -377,74 +491,30 @@ export default function App() {
     };
   }, []);
 
+  // 不挂在设置、提醒、同步这些依赖上。那些一变，旧的 setTimeout 链会被拆掉，拆掉之后没人再装回去。
   useEffect(() => {
-    if (settings?.autoHide !== false) return;
-    if (!hidden && !stowing) return;
-    hideGen.current += 1;
-    setStowing(false);
-    setHidden(false);
-    stopHoverWatch();
-    api.raiseTopmost().catch(() => undefined);
-  }, [settings?.autoHide, hidden, stowing]);
-
-  useEffect(() => {
-    let dead = false;
-    const arm = (ms: number) => {
-      window.clearTimeout(hideTimer.current);
-      if (dead) return;
-      hideTimer.current = window.setTimeout(tick, ms);
-    };
-    const tick = () => {
-      if (dead) return;
-      const now = performance.now();
-      if (stowingRef.current && stowSince.current && now - stowSince.current > 2000 && !hiddenRef.current) {
-        hideGen.current += 1;
-        stowingRef.current = false;
-        stowSince.current = 0;
-        setStowing(false);
-      }
-      const over = !!document.getElementById("root")?.matches(":hover");
-      hoveredRef.current = over;
-      const idleMs = idleSince.current ? now - idleSince.current : 0;
-      const decision = nextHideTick({
-        autoHide: autoHideRef.current,
-        hidden: hiddenRef.current,
-        hover: over,
-        remind: !!remindRef.current,
-        hint: !!campusHintRef.current,
-        login: silentLoginRef.current,
-        stowing: stowingRef.current,
-        idleMs,
-      });
-      if (decision.kind === "stop") return;
-      if (decision.kind === "wait") {
-        if (decision.resetIdle) idleSince.current = 0;
-        else if (!idleSince.current) idleSince.current = now;
-        arm(decision.ms);
-        return;
-      }
-      idleSince.current = 0;
-      void hideIsland().finally(() => {
-        if (dead || hiddenRef.current || !autoHideRef.current) return;
-        idleSince.current = performance.now();
-        arm(HIDE_AFTER_MS);
-      });
-    };
-    scheduleRef.current = (ms: number) => {
-      if (!autoHideRef.current) return;
+    const id = window.setInterval(() => {
+      tickRef.current();
+    }, HIDE_POLL_MS);
+    tickRef.current();
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (gameFsRef.current || phaseRef.current !== "hidden") return;
+      hideGen.current += 1;
+      closingRef.current = false;
+      phaseRef.current = "shown";
+      stowSince.current = 0;
       idleSince.current = performance.now();
-      arm(ms);
+      setStowing(false);
+      setHidden(false);
+      void stopHoverWatch();
     };
-    if (settings?.autoHide && !hidden) {
-      idleSince.current = performance.now();
-      arm(HIDE_AFTER_MS);
-    }
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
-      dead = true;
-      window.clearTimeout(hideTimer.current);
-      scheduleRef.current = () => undefined;
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [settings?.autoHide, hidden, remind, campusHint, silentLogin, hideIsland]);
+  }, []);
 
   useEffect(() => {
     if (!remind) return;
@@ -517,6 +587,7 @@ export default function App() {
 
   function onDragPointerDown(e: React.PointerEvent) {
     if (e.button !== 0) return;
+    cancelStowRef.current();
     dragOrigin.current = { x: e.screenX, y: e.screenY, pointerId: e.pointerId };
     draggingRef.current = false;
     dragSession.current = null;
@@ -579,8 +650,7 @@ export default function App() {
       return;
     }
     if (e.button !== 0 || e.type === "pointercancel") return;
-    hideGen.current += 1;
-    setStowing(false);
+    cancelStowRef.current();
     openDesk();
   }
 

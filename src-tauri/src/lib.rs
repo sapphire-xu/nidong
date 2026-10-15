@@ -446,52 +446,6 @@ fn same_dir(a: &std::path::Path, b: &std::path::Path) -> bool {
     norm(a) == norm(b)
 }
 
-/// 注册表里的安装比当前这个 exe 新时，改去打开那一份。
-/// 开发构建和 target 目录里的程序不跳。单实例锁还没建，可以直接拉起。
-#[cfg(windows)]
-fn handoff_newer_install() -> bool {
-    if cfg!(debug_assertions) {
-        return false;
-    }
-    let Ok(current) = std::env::current_exe() else {
-        return false;
-    };
-    let text = current.to_string_lossy().to_ascii_lowercase();
-    if text.contains("\\target\\debug\\") || text.contains("\\target\\release\\") {
-        return false;
-    }
-    let Some(current_dir) = current.parent() else {
-        return false;
-    };
-    let Some(install_dir) = reg_sz(r"Software\sapphire_fic\泥洞", None) else {
-        return false;
-    };
-    let install_dir = std::path::PathBuf::from(install_dir);
-    if same_dir(current_dir, &install_dir) {
-        return false;
-    }
-    let installed = install_dir.join("nidong.exe");
-    if !installed.is_file() {
-        return false;
-    }
-    let Some(installed_ver) = reg_sz(
-        r"Software\Microsoft\Windows\CurrentVersion\Uninstall\泥洞",
-        Some("DisplayVersion"),
-    ) else {
-        return false;
-    };
-    if !version_gt(&installed_ver, env!("CARGO_PKG_VERSION")) {
-        return false;
-    }
-    let _ = std::process::Command::new(&installed).spawn();
-    true
-}
-
-#[cfg(not(windows))]
-fn handoff_newer_install() -> bool {
-    false
-}
-
 #[cfg(windows)]
 fn exe_name_is_nidong(sz: &[u16]) -> bool {
     let end = sz.iter().position(|&c| c == 0).unwrap_or(sz.len());
@@ -913,7 +867,7 @@ fn spawn_refresh(app: AppHandle) {
     let _ = app.emit("auth-status", "syncing");
     tauri::async_runtime::spawn(async move {
         if let Some(state) = app.try_state::<AppState>() {
-            match refresh_inner(&state, true).await {
+            match refresh_inner(&app, &state, true).await {
                 Ok(snap) => {
                     let status = if snap.offline {
                         "idle"
@@ -1015,7 +969,7 @@ async fn refresh(app: AppHandle, state: State<'_, AppState>) -> Result<Snapshot>
     let snap = if !crate::util::online() {
         apply_offline(&state)
     } else {
-        refresh_inner(&state, true).await?
+        refresh_inner(&app, &state, true).await?
     };
     emit_snapshot(&app, &snap);
     Ok(snap)
@@ -1057,7 +1011,82 @@ async fn load_month(state: State<'_, AppState>, year: i32, month: u32) -> Result
     Ok(snap.clone())
 }
 
-async fn refresh_inner(state: &AppState, retry_courses: bool) -> Result<Snapshot> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthGate {
+    /// 票还在，或这一跳看不清。留在当前页。
+    Proceed,
+    /// 登录页已确认票过期，而且开了自动登录。先用存好的密码重登，不要先把界面切走。
+    Relogin,
+    /// 没有可用的自动登录。回到登录页。
+    ShowLogin,
+}
+
+/// CASTGC 的 Max-Age 是 2 小时。进程醒着时，过期只发生在刷新里，启动时的自动登录不会再跑。
+fn auth_gate(probe: SessionState, has_tgt: bool, auto_login: bool, has_password: bool) -> AuthGate {
+    if has_tgt || matches!(probe, SessionState::Valid | SessionState::Unknown) {
+        return AuthGate::Proceed;
+    }
+    match probe {
+        SessionState::Expired | SessionState::NeedSms if auto_login && has_password => AuthGate::Relogin,
+        SessionState::Expired | SessionState::NeedSms => AuthGate::ShowLogin,
+        SessionState::Valid | SessionState::Unknown => AuthGate::Proceed,
+    }
+}
+
+fn credential_rejected(msg: &str) -> bool {
+    msg.contains("学号或密码") || msg.contains("认证失败") || msg.contains("账号不存在")
+}
+
+fn mark_logged_out(state: &AppState, reason: &str) -> Snapshot {
+    let mut snap = state.snapshot.lock().unwrap().clone();
+    snap.logged_in = false;
+    snap.offline = false;
+    snap.errors.auth = Some(reason.into());
+    attach_local(&state.data_dir, &mut snap);
+    save_snapshot_file(&state.data_dir, &snap);
+    *state.snapshot.lock().unwrap() = snap.clone();
+    snap
+}
+
+enum ReloginResult {
+    Continue,
+    Stop(Snapshot),
+}
+
+async fn relogin(app: &AppHandle, state: &AppState, client: &NeuClient) -> ReloginResult {
+    let Some((user, pass)) = stored_login(state) else {
+        return ReloginResult::Stop(mark_logged_out(state, "会话已失效，请重新登录"));
+    };
+    let settings = state.settings.lock().unwrap().clone();
+    match client.login_ex(&user, &pass, false).await {
+        Ok(LoginOutcome::Ok) => {
+            mark_logged_in(state, &user);
+            ReloginResult::Continue
+        }
+        Ok(out @ LoginOutcome::NeedSms { .. }) => {
+            *state.pending_login.lock().unwrap() = Some(PendingLogin {
+                username: user,
+                password: pass,
+                remember: settings.remember_password,
+                auto: settings.auto_login,
+            });
+            let _ = app.emit("need-sms", &out);
+            let _ = app.emit("auth-status", "need_sms");
+            ReloginResult::Stop(mark_logged_out(state, "换了网络，这台电脑需要再验证一次"))
+        }
+        Err(e) => {
+            let es = e.to_string();
+            if credential_rejected(&es) {
+                let _ = app.emit("auth-status", format!("fail:{es}"));
+                ReloginResult::Stop(mark_logged_out(state, &es))
+            } else {
+                ReloginResult::Continue
+            }
+        }
+    }
+}
+
+async fn refresh_inner(app: &AppHandle, state: &AppState, retry_courses: bool) -> Result<Snapshot> {
     let _refresh_gate = state.refresh_gate.lock().await;
     let settings = state.settings.lock().unwrap().clone();
     let data_dir = state.data_dir.clone();
@@ -1079,9 +1108,8 @@ async fn refresh_inner(state: &AppState, retry_courses: bool) -> Result<Snapshot
             return Err("未登录".into());
         }
     };
-    let username = c.username();
-
-    let session = if c.has_tgt() {
+    let has_tgt = c.has_tgt();
+    let probe = if has_tgt {
         SessionState::Valid
     } else {
         match tokio::time::timeout(Duration::from_secs(10), c.session_state()).await {
@@ -1090,23 +1118,33 @@ async fn refresh_inner(state: &AppState, retry_courses: bool) -> Result<Snapshot
                 if !crate::util::online() {
                     return Ok(apply_offline(state));
                 }
-                SessionState::Expired
+                SessionState::Unknown
             }
         }
     };
-    if session == SessionState::Expired && !c.has_tgt() {
-        if !crate::util::online() {
-            return Ok(apply_offline(state));
+    let has_password = if !has_tgt && matches!(probe, SessionState::Expired | SessionState::NeedSms) {
+        stored_login(state).is_some()
+    } else {
+        false
+    };
+    match auth_gate(probe, has_tgt, settings.auto_login, has_password) {
+        AuthGate::Proceed => {}
+        AuthGate::ShowLogin => {
+            if !crate::util::online() {
+                return Ok(apply_offline(state));
+            }
+            return Ok(mark_logged_out(state, "会话已失效，请重新登录"));
         }
-        let mut snap = state.snapshot.lock().unwrap().clone();
-        snap.logged_in = false;
-        snap.offline = false;
-        snap.errors.auth = Some("会话已失效，请重新登录".into());
-        attach_local(&data_dir, &mut snap);
-        save_snapshot_file(&data_dir, &snap);
-        *state.snapshot.lock().unwrap() = snap.clone();
-        return Ok(snap);
+        AuthGate::Relogin => {
+            if !crate::util::online() {
+                return Ok(apply_offline(state));
+            }
+            if let ReloginResult::Stop(snap) = relogin(app, state, &c).await {
+                return Ok(snap);
+            }
+        }
     }
+    let username = c.username();
 
     let (cached_sem, prev) = {
         let snap = state.snapshot.lock().unwrap();
@@ -1551,16 +1589,8 @@ async fn logout(app: AppHandle, state: State<'_, AppState>, keep_agenda: bool) -
 }
 
 fn emit_logged_out_keep_cache(app: &AppHandle, state: &AppState, reason: &str) {
-    let mut snap = state.snapshot.lock().unwrap().clone();
-    snap.logged_in = false;
-    snap.offline = false;
-    if snap.errors.auth.is_none() {
-        snap.errors.auth = Some(reason.into());
-    }
-    attach_local(&state.data_dir, &mut snap);
-    save_snapshot_file(&state.data_dir, &snap);
-    *state.snapshot.lock().unwrap() = snap.clone();
-    emit_snapshot(&app, &snap);
+    let snap = mark_logged_out(state, reason);
+    emit_snapshot(app, &snap);
     let _ = app.emit("auth-status", "idle");
 }
 
@@ -1601,34 +1631,36 @@ async fn resume_session(app: AppHandle) {
         }
     };
 
-    match session {
-        Some(SessionState::Valid) => {
-            let _ = app.emit("auth-status", "syncing");
-            match refresh_inner(&state, true).await {
-                Ok(snap) => {
-                    let status = if snap.offline {
-                        "idle"
-                    } else if snap.logged_in {
-                        "ok"
-                    } else {
-                        "idle"
-                    };
-                    emit_snapshot(&app, &snap);
-                    let _ = app.emit("auth-status", status);
-                }
-                Err(e) => {
-                    let es = e.to_string();
-                    if session_is_open(&state.data_dir)
-                        && (!crate::util::online() || crate::util::is_offline_err(&es))
-                    {
-                        emit_offline(&app, &state);
-                    } else {
-                        emit_logged_out_keep_cache(&app, &state, "会话已失效，请重新登录");
-                    }
+    let refresh_kept = matches!(session, Some(SessionState::Valid))
+        || (matches!(session, Some(SessionState::Unknown)) && session_is_open(&state.data_dir));
+    if refresh_kept {
+        let _ = app.emit("auth-status", "syncing");
+        match refresh_inner(&app, &state, true).await {
+            Ok(snap) => {
+                let status = if snap.offline {
+                    "idle"
+                } else if snap.logged_in {
+                    "ok"
+                } else {
+                    "idle"
+                };
+                emit_snapshot(&app, &snap);
+                let _ = app.emit("auth-status", status);
+            }
+            Err(e) => {
+                let es = e.to_string();
+                if session_is_open(&state.data_dir)
+                    && (!crate::util::online() || crate::util::is_offline_err(&es))
+                {
+                    emit_offline(&app, &state);
+                } else {
+                    emit_logged_out_keep_cache(&app, &state, "会话已失效，请重新登录");
                 }
             }
-            return;
         }
+        return;
+    }
+    match session {
         Some(SessionState::NeedSms) => {
             if settings.auto_login && settings.remember_password {
                 // fall through to password login, which may resume 2FA
@@ -1643,6 +1675,16 @@ async fn resume_session(app: AppHandle) {
         Some(SessionState::Expired) | None => {
             if !(settings.auto_login && settings.remember_password) {
                 if session_is_open(&state.data_dir) && !crate::util::online() {
+                    emit_offline(&app, &state);
+                } else {
+                    emit_logged_out_keep_cache(&app, &state, "会话已失效，请重新登录");
+                }
+                return;
+            }
+        }
+        Some(SessionState::Unknown) | Some(SessionState::Valid) => {
+            if !(settings.auto_login && settings.remember_password) {
+                if session_is_open(&state.data_dir) {
                     emit_offline(&app, &state);
                 } else {
                     emit_logged_out_keep_cache(&app, &state, "会话已失效，请重新登录");
@@ -1710,9 +1752,8 @@ async fn resume_session(app: AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    if handoff_newer_install() {
-        return;
-    }
+    // 不根据 HKCU 启动另一个 nidong.exe。那两处注册表当前用户就能改，
+    // 安装包又没有 Authenticode 签名。见 docs/给AI.md「自动更新」。
     evict_other_copies();
     let mut builder = tauri::Builder::default();
     builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -1835,7 +1876,7 @@ pub fn run() {
                     if !crate::util::online() {
                         continue;
                     }
-                    if let Ok(snap) = refresh_inner(&state, false).await {
+                    if let Ok(snap) = refresh_inner(&ticker, &state, false).await {
                         emit_snapshot(&ticker, &snap);
                     }
                 }
@@ -1908,7 +1949,7 @@ pub fn run() {
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
                             if let Some(state) = app.try_state::<AppState>() {
-                                if let Ok(snap) = refresh_inner(&state, true).await {
+                                if let Ok(snap) = refresh_inner(&app, &state, true).await {
                                     emit_snapshot(&app, &snap);
                                 }
                             }
@@ -1979,7 +2020,42 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{compose_tray_tip, elec_night, format_rate, settle_elec, ElecInfo};
+    use super::{
+        auth_gate, compose_tray_tip, credential_rejected, elec_night, format_rate, settle_elec, AuthGate,
+        ElecInfo,
+    };
+    use crate::client::SessionState;
+
+    #[test]
+    fn expired_tgt_with_auto_login_does_not_open_the_login_page() {
+        assert_eq!(
+            auth_gate(SessionState::Expired, false, true, true),
+            AuthGate::Relogin
+        );
+        assert_eq!(
+            auth_gate(SessionState::NeedSms, false, true, true),
+            AuthGate::Relogin
+        );
+        assert_eq!(
+            auth_gate(SessionState::Unknown, false, true, true),
+            AuthGate::Proceed
+        );
+        assert_eq!(
+            auth_gate(SessionState::Expired, true, false, false),
+            AuthGate::Proceed
+        );
+        assert_eq!(
+            auth_gate(SessionState::Expired, false, true, false),
+            AuthGate::ShowLogin
+        );
+        assert_eq!(
+            auth_gate(SessionState::Expired, false, false, true),
+            AuthGate::ShowLogin
+        );
+        assert!(!credential_rejected("网络不稳定，请再试一次"));
+        assert!(!credential_rejected("一号通访问被拒绝"));
+        assert!(credential_rejected("学号或密码不对"));
+    }
 
     #[test]
     fn elec_quiet_hours_are_23_to_6() {

@@ -14,6 +14,7 @@ import {
   Switch,
   Textarea,
 } from "@fluentui/react-components";
+import { repeatSpansDays } from "./agenda";
 import { REMIND_CODES } from "./classify";
 import type { Agenda, RepetFreq, RepetRule } from "./types";
 
@@ -212,6 +213,10 @@ export function EventForm(props: {
       setLocalErr("结束时间必须晚于开始时间");
       return;
     }
+    if (repet && repeatSpansDays(startStamp, endStamp)) {
+      setLocalErr("跨天日程不能重复");
+      return;
+    }
     let rule: RepetRule | undefined;
     if (repet) {
       const num = Math.floor(Number(repetNum));
@@ -275,6 +280,10 @@ export function EventForm(props: {
     if (next === "WEEKLY" && byday.length === 0) setByday([weekdayCode(start)]);
   }
 
+  const startDay = joinDate(start);
+  const endDay = joinDate(end);
+  const crossRepeat = repet && repeatSpansDays(startDay ? `${startDay}T00:00` : "", endDay ? `${endDay}T00:00` : "");
+
   return (
     <Dialog open={props.open} onOpenChange={(_, data) => { if (!data.open) props.onClose(); }}>
       <DialogSurface>
@@ -297,6 +306,7 @@ export function EventForm(props: {
                 if (d.checked) pickFreq(freq);
               }}
             />
+            {crossRepeat ? <p className="hint warn">跨天日程不能重复</p> : null}
             {repet ? (
               <>
                 <Field label="重复频率">

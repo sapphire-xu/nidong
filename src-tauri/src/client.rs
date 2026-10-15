@@ -60,7 +60,10 @@ fn build_http(
 pub enum SessionState {
     Valid,
     NeedSms,
+    /// 登录页确认票已失效。
     Expired,
+    /// 超时、空页、网关拦截。看不清，不能据此把人送回登录。
+    Unknown,
 }
 
 pub struct NeuClient {
@@ -361,7 +364,7 @@ impl NeuClient {
                 } else if self.has_tgt() {
                     SessionState::Valid
                 } else {
-                    SessionState::Expired
+                    SessionState::Unknown
                 };
             }
         };
@@ -371,10 +374,6 @@ impl NeuClient {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_string();
-        if loc.contains("ticket=") {
-            self.set_sms_pending(false);
-            return SessionState::Valid;
-        }
         let ct = resp
             .headers()
             .get(CONTENT_TYPE)
@@ -384,15 +383,30 @@ impl NeuClient {
             Ok(b) => decode_bytes(&b, ct.as_deref()),
             Err(_) => String::new(),
         };
-        if html.contains("ticket=") {
+        let state = Self::classify_cas_probe(&loc, &html);
+        if state == SessionState::Valid {
             self.set_sms_pending(false);
-            SessionState::Valid
-        } else if Self::login_needs_sms(&html) || loc.contains("second") {
+        } else if state == SessionState::NeedSms {
             self.set_sms_pending(true);
-            SessionState::NeedSms
-        } else {
-            SessionState::Expired
         }
+        state
+    }
+
+    /// 只根据这一跳的 Location 和正文判断。空页和拦截页不是登录页。
+    pub fn classify_cas_probe(loc: &str, html: &str) -> SessionState {
+        if loc.contains("ticket=") || html.contains("ticket=") {
+            return SessionState::Valid;
+        }
+        if Self::login_needs_sms(html) || loc.contains("second") {
+            return SessionState::NeedSms;
+        }
+        if html.trim().is_empty() || Self::access_denied_html(html) {
+            return SessionState::Unknown;
+        }
+        if Self::session_lost_html(html) {
+            return SessionState::Expired;
+        }
+        SessionState::Unknown
     }
 
     pub fn session_lost_html(html: &str) -> bool {
@@ -534,7 +548,7 @@ impl NeuClient {
                     self.capture_sms_form(&page);
                     return self.need_sms(&page).await;
                 }
-                SessionState::Expired => {}
+                SessionState::Expired | SessionState::Unknown => {}
             }
         } else if !self.sms_pending()
             && self.has_tgt()
@@ -669,6 +683,7 @@ impl NeuClient {
                 SessionState::Valid => return Ok(LoginOutcome::Ok),
                 SessionState::NeedSms => self.set_sms_pending(true),
                 SessionState::Expired => return Err("二次认证已过期，请重新登录".into()),
+                SessionState::Unknown => return Err("网络不稳定，请再试一次".into()),
             }
         }
         let service = urlencoding::encode(SERVICE_CARD);
@@ -1863,6 +1878,34 @@ mod tests {
             Ok(card) => println!("CARD_OK {card:?}"),
             Err(e) => println!("CARD_ERR {e}"),
         }
+    }
+
+    #[test]
+    fn cas_probe_does_not_treat_a_blip_as_logout() {
+        assert_eq!(
+            NeuClient::classify_cas_probe("https://portal.neu.edu.cn/tp_up/?ticket=ST-1", ""),
+            SessionState::Valid
+        );
+        assert_eq!(
+            NeuClient::classify_cas_probe(
+                "",
+                r#"<input id="un"/><input id="pd"/><input id="index_login_btn"/>"#
+            ),
+            SessionState::Expired
+        );
+        assert_eq!(
+            NeuClient::classify_cas_probe("", r#"<form id="second_auth_form">当前设备需进行身份验证</form>"#),
+            SessionState::NeedSms
+        );
+        assert_eq!(NeuClient::classify_cas_probe("", ""), SessionState::Unknown);
+        assert_eq!(
+            NeuClient::classify_cas_probe("", "访问被拒绝"),
+            SessionState::Unknown
+        );
+        assert_eq!(
+            NeuClient::classify_cas_probe("https://portal.neu.edu.cn/tp_up/", "门户首页"),
+            SessionState::Unknown
+        );
     }
 
     #[test]

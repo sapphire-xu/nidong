@@ -126,6 +126,9 @@ fn normalize_rule(item: &mut AgendaItem) -> Result<()> {
         item.repet_rule = None;
         return Ok(());
     }
+    if item.start.get(..10) != item.end.get(..10) {
+        return Err("跨天日程不能重复".into());
+    }
     let mut rule = item.repet_rule.clone().ok_or("请选择重复频率")?;
     let freq = rule.freq.trim().to_ascii_uppercase();
     if !matches!(freq.as_str(), "DAILY" | "WEEKLY") {
@@ -336,5 +339,17 @@ mod tests {
             num: 2,
         });
         assert!(normalize(&mut bad).is_err());
+    }
+
+    #[test]
+    fn cross_day_repeat_is_rejected() {
+        let mut overnight = item("通宵", "2026-10-05T22:00", "2026-10-06T01:00");
+        overnight.is_repet = true;
+        overnight.repet_rule = Some(daily(4));
+        assert!(normalize(&mut overnight).is_err());
+        let mut same = item("班会", "2026-10-05T22:00", "2026-10-05T23:00");
+        same.is_repet = true;
+        same.repet_rule = Some(daily(4));
+        assert!(normalize(&mut same).is_ok());
     }
 }

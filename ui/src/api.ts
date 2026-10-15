@@ -67,6 +67,8 @@ export type MeterStatus = {
   v6DownBps: number;
   night: boolean;
   elevated: boolean;
+  udpReady: boolean;
+  udpGap: boolean;
   today: MeterTotals | null;
   month: MeterTotals | null;
   error: string;

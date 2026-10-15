@@ -22,6 +22,8 @@ struct Live {
     v6_down_bps: u64,
     night: bool,
     elevated: bool,
+    udp_ready: bool,
+    udp_gap: bool,
     updated: u64,
 }
 
@@ -101,6 +103,8 @@ fn loop_sample() {
         ledger.month = month;
     }
     let mut sampler = Sampler::new();
+    let udp_watch = crate::udp::Watch::start();
+    let _ = udp_watch.take(false);
     let mut last_save = Instant::now();
     let mut last_poll = Instant::now();
     loop {
@@ -111,16 +115,19 @@ fn loop_sample() {
         ledger = store::archive_if_needed(&path, ledger, &month);
         let (on_campus, ipv4, ipv6) = crate::place::currently_on_campus();
         let tick = sampler.poll(night);
+        let udp = udp_watch.take(night);
+        // 会话正常时 TCP 已在事件里。再叠连接计数会把长连接算两次。
+        let totals = if udp.ready && !udp.gap { udp.totals } else { tick.totals };
         let elapsed = last_poll.elapsed().as_secs_f64().max(0.2);
         last_poll = Instant::now();
         if on_campus {
-            ledger.add(&day, tick.totals);
+            ledger.add(&day, totals);
         }
-        let v4_down = tick.totals.v4_day + tick.totals.v4_night;
+        let v4_down = totals.v4_day + totals.v4_night;
         let (v4_down_bps, v6_down_bps) = if on_campus {
             (
                 (v4_down as f64 / elapsed) as u64,
-                (tick.totals.v6_down as f64 / elapsed) as u64,
+                (totals.v6_down as f64 / elapsed) as u64,
             )
         } else {
             (0, 0)
@@ -133,6 +140,8 @@ fn loop_sample() {
             v6_down_bps,
             night,
             elevated: true,
+            udp_ready: udp.ready,
+            udp_gap: udp.gap,
             updated: unix_now(),
         });
         if last_save.elapsed() >= Duration::from_secs(30) {
@@ -142,6 +151,7 @@ fn loop_sample() {
         thread::sleep(Duration::from_secs(2));
     }
     let _ = store::save_ledger(&path, &ledger);
+    drop(udp_watch);
     let _ = fs::remove_file(stop_path());
     release_mutex();
 }
@@ -174,6 +184,8 @@ pub fn read_live() -> Option<LiveOwned> {
         v6_down_bps: v.get("v6DownBps").and_then(|x| x.as_u64()).unwrap_or(0),
         night: v.get("night").and_then(|x| x.as_bool()).unwrap_or(false),
         elevated: v.get("elevated").and_then(|x| x.as_bool()).unwrap_or(true),
+        udp_ready: v.get("udpReady").and_then(|x| x.as_bool()).unwrap_or(false),
+        udp_gap: v.get("udpGap").and_then(|x| x.as_bool()).unwrap_or(false),
         updated: v.get("updated").and_then(|x| x.as_u64()).unwrap_or(0),
     })
 }
@@ -186,6 +198,8 @@ pub struct LiveOwned {
     pub v6_down_bps: u64,
     pub night: bool,
     pub elevated: bool,
+    pub udp_ready: bool,
+    pub udp_gap: bool,
     pub updated: u64,
 }
 

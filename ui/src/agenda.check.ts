@@ -1,4 +1,4 @@
-import { agendasOnDate, occurrencesOnDate, upcomingAgenda } from "./agenda";
+import { agendasOnDate, occurrencesOnDate, repeatSpansDays, upcomingAgenda } from "./agenda";
 import type { Agenda, RepetRule } from "./types";
 
 function assert(cond: unknown, msg: string) {
@@ -54,6 +54,16 @@ const overnight = ev({
 assert(occurrencesOnDate(overnight, "2026-10-05").length === 1, "starts the first night");
 assert(occurrencesOnDate(overnight, "2026-10-06").length === 1, "spills into the next morning");
 assert(occurrencesOnDate(overnight, "2026-10-07").length === 0, "only one occurrence");
+const rolled = ev({
+  start: "2026-10-05T22:00",
+  end: "2026-10-06T01:00",
+  isRepet: true,
+  repetRule: rule({ freq: "DAILY", endmode: "NUMBER", num: 4 }),
+});
+assert(repeatSpansDays(rolled.start, rolled.end), "cross-day detector");
+assert(!repeatSpansDays("2026-10-05T22:00", "2026-10-05T23:00"), "same day can repeat");
+assert(occurrencesOnDate(rolled, "2026-10-07").length === 0, "cross-day repeat does not roll forward");
+assert(occurrencesOnDate(rolled, "2026-10-08").length === 0, "later days stay empty");
 
 const soon = ev({
   start: "2026-10-06T21:00",

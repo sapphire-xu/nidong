@@ -39,10 +39,19 @@ function covers(start: string, end: string, ymd: string): boolean {
 
 type Span = { start: Date; end: Date };
 
+/** 开始日和结束日不是同一天。这种日程不允许再叠加重复。 */
+export function repeatSpansDays(start: string, end: string): boolean {
+  const s = (start || "").slice(0, 10);
+  const e = (end || "").slice(0, 10);
+  return s.length === 10 && e.length === 10 && s !== e;
+}
+
 function ruleOf(a: Agenda): RepetRule | null {
   const freq = a.repetRule?.freq;
   if (!a.isRepet || (freq !== "DAILY" && freq !== "WEEKLY")) return null;
   if (a.repetRule?.endmode !== "DATE" && a.repetRule?.endmode !== "NUMBER") return null;
+  // 跨天重复展开会重叠、漏天。非法组合不当成系列，只留原来那一段。
+  if (repeatSpansDays(a.start, a.end)) return null;
   return a.repetRule || null;
 }
 

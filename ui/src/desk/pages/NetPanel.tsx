@@ -285,6 +285,11 @@ export function NetPanel(props: { portalBytes?: number; portalKnown: boolean }) 
                   <div className="v num">{formatRate(status.v6DownBps)}</div>
                 </div>
               </div>
+              {status.udpGap ? (
+                <p className="hint warn">这一段事件丢了，UDP 没有写入。TCP 按连接计数补上。</p>
+              ) : status.udpReady ? null : (
+                <p className="hint">UDP 没有接上，隧道里的流量不会出现在上面的速度里。</p>
+              )}
               <p className="net-portal">校园网记录的流量 {props.portalKnown && props.portalBytes != null ? formatBytes(props.portalBytes) : "—"}</p>
             </div>
           ) : (
@@ -298,7 +303,7 @@ export function NetPanel(props: { portalBytes?: number; portalKnown: boolean }) 
           <div className="net-sheet">
             <MeterTable today={status.today} month={status.month} />
           </div>
-          <p className="src">上面的「校园网记录」是门户上的本月合计。表里是这台电脑自己记的。校内 IPv4 下载和 UDP 不进表。</p>
+          <p className="src">上面的「校园网记录」是门户上的本月合计。表里是这台电脑自己记的。校内 IPv4 下载不进表。TCP 和 UDP 并进这五列；某一轮事件丢了，这一轮的 UDP 不写。</p>
           <hr className="net-split" />
           <div className="share-actions net-toolbar">
             <div className="net-toolbar-start">
