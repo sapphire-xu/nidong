@@ -1,11 +1,11 @@
 {
-  "version": "2.3.6",
-  "notes": "new version",
-  "pub_date": "2026-10-14T10:48:09Z",
+  "version": "2.3.7",
+  "notes": "悬浮岛开启自动隐藏后会自己收起。跨天的日程不能再设成重复。校园网流量记录会计上 UDP。",
+  "pub_date": "2026-10-15T09:16:54Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZCswalYxVGJxRThQWXFMRlR4QzB1cFFQdjRIWnhZeEREdWhVQmFWUXJ4TTlCUU1UZCtPS0R1ZUpRUTVwZVN1a0UwMi9tcEliZzFLRDhUMVNFa25Mc0E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxOTc0ODg4CWZpbGU65rOl5rSeXzIuMy42X3g2NC1zZXR1cC5leGUKVWRkOHdwd2gvMnpmTXVEZG1acWpiL1dKMGlxdzBkcTFiTFBieTYyb1VzZWpxc2hMUW9WT2MvZFAxL0dtRmVPcEo1Y05ZSnZ4aUtNWFV1VFRVbDVvQ2c9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.3.6_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDRKREUvZGdTUnpHVGh0SzlpSXMrOWxrUCttQ0dQVTRpVFh4OUJ2ZTlUSzRXQ0pYaURRc3c4V0hJbVJDTFpSeVpJbG1ZcDd5MTRGQWtaNDlFNmYydXdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMDU1ODEzCWZpbGU65rOl5rSeXzIuMy43X3g2NC1zZXR1cC5leGUKbXZxQkF3TU5qc0xrc1AvM2prV2JsVUluVDlpSHVGNjY3dngzVVRWamN0cXZHOWxVVUMxOXRMY0cyMG5pZWtWODNZNC9uZ1RjZU1Pei9CeE1iNWViRHc9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.3.7_x64-setup.exe"
     }
   }
 }
