@@ -4,7 +4,7 @@ import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { upcomingAgenda } from "./agenda";
 import { upcomingCourse } from "./course";
-import { abortFold, HIDE_AFTER_MS, HIDE_POLL_MS, shouldResetIdle, stepHide, type HidePhase } from "./autoHide";
+import { abortFold, HIDE_AFTER_MS, HIDE_POLL_MS, HIDE_PULSE_EVENT, shouldResetIdle, stepHide, type HidePhase } from "./autoHide";
 import { deriveDay } from "./dayModel";
 import { fmtMoney, ymd } from "./format";
 import { clampVolume, resolveTheme, withSettingDefaults } from "./prefs";
@@ -54,7 +54,10 @@ export default function App() {
   const autoHideHoverRef = useRef(false);
   const hideGen = useRef(0);
   const remindTimer = useRef(0);
-  const hoverRevealTimer = useRef(0);
+  const remindUntil = useRef(0);
+  const hintClearAt = useRef(0);
+  const endRemindRef = useRef(() => undefined);
+  const clearHintRef = useRef(() => undefined);
   const preRemindRef = useRef<{ hidden: boolean } | null>(null);
   const remindedId = useRef("");
   const startRemindRef = useRef<(c: Course & { kind?: "class" | "event" }) => void>(() => undefined);
@@ -81,6 +84,8 @@ export default function App() {
   const silentLoginRef = useRef(false);
   const preHintHidden = useRef(false);
   const hintTimer = useRef(0);
+  const settingsFlight = useRef(false);
+  const settingsRetryAt = useRef(0);
 
   const theme = resolveTheme(settings?.theme);
   const loggedIn = !!snap?.loggedIn;
@@ -105,9 +110,26 @@ export default function App() {
     return () => mq.removeEventListener("change", onChange);
   }, [settings?.theme]);
 
+  const ensureSettingsRef = useRef(() => undefined);
+  ensureSettingsRef.current = () => {
+    if (settingsRef.current || settingsFlight.current) return;
+    const now = performance.now();
+    if (now < settingsRetryAt.current) return;
+    settingsFlight.current = true;
+    settingsRetryAt.current = now + 1000;
+    api.settings()
+      .then((s) => {
+        if (!settingsRef.current) setSettings(withSettingDefaults(s));
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        settingsFlight.current = false;
+      });
+  };
+
   useEffect(() => {
     api.bootstrap().then(setSnap).catch(() => undefined);
-    api.settings().then((s) => setSettings(withSettingDefaults(s))).catch(() => undefined);
+    ensureSettingsRef.current();
   }, []);
 
   const paint = (phase: HidePhase) => {
@@ -257,6 +279,8 @@ export default function App() {
     busyRef.current = true;
     try {
       let now = performance.now();
+      if (remindUntil.current && now >= remindUntil.current) endRemindRef.current();
+      if (hintClearAt.current && now >= hintClearAt.current) clearHintRef.current();
       if (closingRef.current && stowSince.current && now - stowSince.current > 3000 && !gameFsRef.current) {
         hideGen.current += 1;
         closingRef.current = false;
@@ -352,6 +376,26 @@ export default function App() {
   remindSoundRef.current = settings?.remindSound === true;
   remindVolumeRef.current = clampVolume(settings?.remindVolume) / 100;
 
+  endRemindRef.current = () => {
+    const wasHidden = !!preRemindRef.current?.hidden;
+    const active = !!remindRef.current || !!preRemindRef.current;
+    remindRef.current = null;
+    preRemindRef.current = null;
+    remindUntil.current = 0;
+    window.clearTimeout(remindTimer.current);
+    if (!active) return;
+    setRemind(null);
+    if (wasHidden && autoHideRef.current) armHideRef.current();
+  };
+  clearHintRef.current = () => {
+    hintClearAt.current = 0;
+    window.clearTimeout(hintTimer.current);
+    if (!campusHintRef.current) return;
+    campusHintRef.current = "";
+    setCampusHint("");
+    if (preHintHidden.current && autoHideRef.current) armHideRef.current();
+  };
+
   const startRemind = (course: Course & { kind?: "class" | "event" }) => {
     if (remindSoundRef.current) playRemindSound(remindVolumeRef.current);
     const next = { name: course.name, start: course.start, kind: course.kind || "class" as const };
@@ -360,13 +404,9 @@ export default function App() {
     preRemindRef.current = { hidden: wasHidden };
     reveal();
     setRemind(next);
+    remindUntil.current = performance.now() + 10000;
     window.clearTimeout(remindTimer.current);
-    remindTimer.current = window.setTimeout(() => {
-      remindRef.current = null;
-      preRemindRef.current = null;
-      setRemind(null);
-      if (wasHidden && autoHideRef.current) armHideRef.current();
-    }, 10000);
+    remindTimer.current = window.setTimeout(() => endRemindRef.current(), 10000);
   };
   startRemindRef.current = startRemind;
 
@@ -407,6 +447,7 @@ export default function App() {
       const text = typeof e.payload === "string" ? e.payload : "";
       window.clearTimeout(hintTimer.current);
       if (!text) {
+        hintClearAt.current = 0;
         campusHintRef.current = "";
         setCampusHint("");
         return;
@@ -416,11 +457,10 @@ export default function App() {
       setCampusHint(text);
       if (!gameFsRef.current) revealRef.current();
       if (!text.startsWith("正在")) {
-        hintTimer.current = window.setTimeout(() => {
-          campusHintRef.current = "";
-          setCampusHint("");
-          if (preHintHidden.current && autoHideRef.current) armHideRef.current();
-        }, 4000);
+        hintClearAt.current = performance.now() + 4000;
+        hintTimer.current = window.setTimeout(() => clearHintRef.current(), 4000);
+      } else {
+        hintClearAt.current = 0;
       }
     }).then((f) => unsubs.push(f));
     listen("island-reveal", () => {
@@ -441,23 +481,25 @@ export default function App() {
       gameFsRef.current = false;
       if (!hiddenBeforeFs.current) revealRef.current();
     }).then((f) => unsubs.push(f));
+    // 1 秒停留在 Rust 里计。藏起后页面的 setTimeout 可能不跑。
     listen<boolean>("hover-zone", (e) => {
-      window.clearTimeout(hoverRevealTimer.current);
       if (!e.payload || gameFsRef.current) return;
       if (phaseRef.current !== "hidden" || !autoHideHoverRef.current) return;
-      hoverRevealTimer.current = window.setTimeout(() => {
-        if (phaseRef.current !== "hidden" || !autoHideHoverRef.current || gameFsRef.current) return;
-        revealRef.current();
-      }, 1000);
+      revealRef.current();
     }).then((f) => unsubs.push(f));
     listen("island-reset", () => {
-      window.clearTimeout(hoverRevealTimer.current);
       window.clearTimeout(remindTimer.current);
       remindRef.current = null;
       preRemindRef.current = null;
+      remindUntil.current = 0;
       setRemind(null);
       revealRef.current();
       setSettings((st) => (st ? { ...st, islandX: null, islandY: null } : st));
+    }).then((f) => unsubs.push(f));
+    // 开机后岛不拿焦点，setInterval 会停，这个事件仍会进来。
+    listen(HIDE_PULSE_EVENT, () => {
+      ensureSettingsRef.current();
+      tickRef.current();
     }).then((f) => unsubs.push(f));
     listen("preview-remind", () => {
       const sample = todayCoursesRef.current[0] || {
@@ -493,6 +535,7 @@ export default function App() {
   }, []);
 
   // 不挂在设置、提醒、同步这些依赖上。那些一变，旧的 setTimeout 链会被拆掉，拆掉之后没人再装回去。
+  // 页面定时器停掉时，由 HIDE_PULSE_EVENT 推同一条 tick。
   useEffect(() => {
     const id = window.setInterval(() => {
       tickRef.current();

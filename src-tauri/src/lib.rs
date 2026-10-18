@@ -863,6 +863,25 @@ fn reveal_running_instance(app: &AppHandle) {
     let _ = open_desk_window(app);
 }
 
+/// 岛创建时 `focus: false`，之后也经常不拿焦点。
+/// WebView2 会停掉这种窗口里的 `setInterval`，登录和同步事件仍能把文案画出来，课表就停在外面。
+/// tokio 不受这个限制。窗口还看得见时，每 200ms 敲一下页面里的巡检。
+fn spawn_hide_pulse(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let Some(win) = app.get_webview_window("main") else {
+                continue;
+            };
+            // 问失败时继续敲。问成「不可见」就停，避免把已经藏起的页面反复叫醒。
+            if !win.is_visible().unwrap_or(true) {
+                continue;
+            }
+            let _ = win.emit("island-hide-pulse", ());
+        }
+    });
+}
+
 fn spawn_refresh(app: AppHandle) {
     let _ = app.emit("auth-status", "syncing");
     tauri::async_runtime::spawn(async move {
@@ -1866,6 +1885,7 @@ pub fn run() {
                 resume_session(boot).await;
             });
             // 卡/网/电约 20 分钟。课表不跟这次一起打，除非今天还没同步过。
+            spawn_hide_pulse(app.handle().clone());
             let ticker = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 loop {

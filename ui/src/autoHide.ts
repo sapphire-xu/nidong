@@ -4,6 +4,11 @@ export const HIDE_AFTER_MS = 3000;
 export const STOW_MS = 320;
 /** 收起状态机的巡检间隔。不靠一条会断的 setTimeout 链。 */
 export const HIDE_POLL_MS = 200;
+/**
+ * Rust 侧向岛推的巡检事件。
+ * 开机后岛不拿焦点，WebView2 会停掉 setInterval；这个事件仍会执行。
+ */
+export const HIDE_PULSE_EVENT = "island-hide-pulse";
 
 export type HidePhase = "shown" | "stowing" | "hidden";
 

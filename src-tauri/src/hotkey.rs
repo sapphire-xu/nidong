@@ -81,6 +81,36 @@ pub fn update(settings: &AppSettings) {
     FIRED.store(false, Ordering::Relaxed);
 }
 
+/// 悬停满这么久才通知页面。藏起后页面定时器可能不跑，这一秒不能放在 setTimeout 里。
+const HOVER_DWELL: std::time::Duration = std::time::Duration::from_millis(1000);
+
+#[derive(Default)]
+struct HoverDwell {
+    since: Option<std::time::Instant>,
+    announced: bool,
+}
+
+impl HoverDwell {
+    /// `Some(true)` 是进入满 1 秒，`Some(false)` 是离开已经通知过的热区。
+    fn observe(&mut self, tracking: bool, inside: bool, now: std::time::Instant) -> Option<bool> {
+        if !tracking || !inside {
+            let was = self.announced;
+            self.since = None;
+            self.announced = false;
+            return if was { Some(false) } else { None };
+        }
+        let start = *self.since.get_or_insert(now);
+        if self.announced {
+            return None;
+        }
+        if now.duration_since(start) >= HOVER_DWELL {
+            self.announced = true;
+            return Some(true);
+        }
+        None
+    }
+}
+
 pub fn set_hover_watch(enabled: bool, x: i32, y: i32, width: i32, height: i32) {
     HOVER_X.store(x, Ordering::Relaxed);
     HOVER_Y.store(y, Ordering::Relaxed);
@@ -573,24 +603,26 @@ mod win {
     pub fn start_hover_thread() {
         std::thread::Builder::new()
             .name("nidong-hover".into())
-            .spawn(|| loop {
-                std::thread::sleep(std::time::Duration::from_millis(40));
-                if !HOVER_ON.load(Ordering::Relaxed) {
-                    if HOVER_INSIDE.swap(false, Ordering::SeqCst) {
-                        emit_hover(false);
+            .spawn(|| {
+                let mut dwell = super::HoverDwell::default();
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(40));
+                    let tracking = HOVER_ON.load(Ordering::Relaxed);
+                    let inside = if tracking {
+                        let mut pt = Point { x: 0, y: 0 };
+                        let ok = unsafe { GetCursorPos(&mut pt) } != 0;
+                        let x = HOVER_X.load(Ordering::Relaxed);
+                        let y = HOVER_Y.load(Ordering::Relaxed);
+                        let w = HOVER_W.load(Ordering::Relaxed);
+                        let h = HOVER_H.load(Ordering::Relaxed);
+                        ok && w > 0 && h > 0 && pt.x >= x && pt.x < x + w && pt.y >= y && pt.y < y + h
+                    } else {
+                        false
+                    };
+                    if let Some(edge) = dwell.observe(tracking, inside, std::time::Instant::now()) {
+                        HOVER_INSIDE.store(edge, Ordering::SeqCst);
+                        emit_hover(edge);
                     }
-                    continue;
-                }
-                let mut pt = Point { x: 0, y: 0 };
-                let ok = unsafe { GetCursorPos(&mut pt) } != 0;
-                let x = HOVER_X.load(Ordering::Relaxed);
-                let y = HOVER_Y.load(Ordering::Relaxed);
-                let w = HOVER_W.load(Ordering::Relaxed);
-                let h = HOVER_H.load(Ordering::Relaxed);
-                let inside = ok && w > 0 && h > 0 && pt.x >= x && pt.x < x + w && pt.y >= y && pt.y < y + h;
-                let was = HOVER_INSIDE.swap(inside, Ordering::SeqCst);
-                if inside != was {
-                    emit_hover(inside);
                 }
             })
             .ok();
@@ -618,5 +650,32 @@ mod win {
             }
         }
         CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
+    }
+}
+
+#[cfg(test)]
+mod hover_dwell_tests {
+    use super::HoverDwell;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn announces_only_after_a_full_second() {
+        let mut dwell = HoverDwell::default();
+        let t0 = Instant::now();
+        assert_eq!(dwell.observe(true, true, t0), None);
+        assert_eq!(dwell.observe(true, true, t0 + Duration::from_millis(999)), None);
+        assert_eq!(dwell.observe(true, true, t0 + Duration::from_millis(1000)), Some(true));
+        assert_eq!(dwell.observe(true, true, t0 + Duration::from_millis(1400)), None);
+        assert_eq!(dwell.observe(true, false, t0 + Duration::from_millis(1500)), Some(false));
+        assert_eq!(dwell.observe(true, false, t0 + Duration::from_millis(1600)), None);
+    }
+
+    #[test]
+    fn leaving_early_does_not_announce() {
+        let mut dwell = HoverDwell::default();
+        let t0 = Instant::now();
+        assert_eq!(dwell.observe(true, true, t0), None);
+        assert_eq!(dwell.observe(true, false, t0 + Duration::from_millis(400)), None);
+        assert_eq!(dwell.observe(false, true, t0 + Duration::from_millis(2000)), None);
     }
 }
