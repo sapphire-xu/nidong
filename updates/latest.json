@@ -1,11 +1,11 @@
 {
-  "version": "2.3.8",
-  "notes": "主页上的重复日程写成「重复 2 次 每天」。校园网登录或同步时，悬浮岛仍会在大约 3 秒后收起。",
-  "pub_date": "2026-10-18T10:29:56Z",
+  "version": "2.3.9",
+  "notes": "更新了滚木",
+  "pub_date": "2026-10-18T11:44:56Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDM2ai9jWksyL0RZVDJGQTZhZGNKMGc3UTk2TTJnakp2bEVYZkpUZVhmeHNOTTNVd1BsN3JjdTNReDdCUmE3Y1FDZlN5SytORWorWDMzcjJjWCtoVFFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMzE5Mzk2CWZpbGU65rOl5rSeXzIuMy44X3g2NC1zZXR1cC5leGUKOUNTY3R5cGtVMVcrd1cxOHA1OUFVOFQzZmJUNlBzbmt6UDI0M2Z0SXBDc0c4dnA0Q1hmNFZxUUpKWVFMWG5EWXlQOGduMlVIODVJZjZXV3I5enZyQXc9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.3.8_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZHd0NmtMQko1T2Nyc1c5VkdHeTRDbEdJa0JaRGlVSXYzR3AxL1VWbDNBVkxOL2lhVGNwVnJPQnhXRUFvY1FzZklQY2REeFJ5RjgxRmU5cStLbnhsQkFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMzIzODk2CWZpbGU65rOl5rSeXzIuMy45X3g2NC1zZXR1cC5leGUKRTI2eWk2TXRBdHJxa2E4TUJrMVJ2ZVVrRElZc05kR3U2UzFnbWx1bHJSSmRKZkhnUFhiZDk5bStLT2gxSldNWlBmTG1VaFVlWXlQQUZoVGtITjZMQUE9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.3.9_x64-setup.exe"
     }
   }
 }
