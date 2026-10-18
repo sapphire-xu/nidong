@@ -4,7 +4,7 @@ import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { upcomingAgenda } from "./agenda";
 import { upcomingCourse } from "./course";
-import { HIDE_AFTER_MS, HIDE_POLL_MS, shouldResetIdle, stepHide, type HidePhase } from "./autoHide";
+import { abortFold, HIDE_AFTER_MS, HIDE_POLL_MS, shouldResetIdle, stepHide, type HidePhase } from "./autoHide";
 import { deriveDay } from "./dayModel";
 import { fmtMoney, ymd } from "./format";
 import { clampVolume, resolveTheme, withSettingDefaults } from "./prefs";
@@ -154,14 +154,13 @@ export default function App() {
   const finishHide = async () => {
     const gen = ++hideGen.current;
     closingRef.current = true;
-    const dropped = () =>
-      hideGen.current !== gen
-      || !!remindRef.current
-      || !!campusHintRef.current
-      || silentLoginRef.current
-      || gameFsRef.current
-      || !autoHideRef.current
-      || pointerOnIsland();
+    const dropped = () => abortFold({
+      superseded: hideGen.current !== gen,
+      remind: !!remindRef.current,
+      fullscreen: gameFsRef.current,
+      autoHide: autoHideRef.current,
+      hover: pointerOnIsland(),
+    });
     // 折叠类名清掉之后不能再把窗口留在隐藏。全屏自己负责藏，这里不要把它叫回来。
     const undoHide = () => {
       closingRef.current = false;
@@ -388,10 +387,12 @@ export default function App() {
         silentLoginRef.current = true;
         setSilentLogin(true);
         setRefreshUi("idle");
+        if (phaseRef.current !== "hidden") cancelStowRef.current();
       } else if (p === "syncing") {
         silentLoginRef.current = true;
         setSilentLogin(true);
         setRefreshUi("spin");
+        if (phaseRef.current !== "hidden") cancelStowRef.current();
       } else if (p === "ok" || p === "idle" || p === "need_sms") {
         silentLoginRef.current = false;
         setSilentLogin(false);

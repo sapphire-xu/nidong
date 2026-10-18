@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { HIDE_AFTER_MS, STOW_MS, shouldResetIdle, stepHide, type HideView } from "./autoHide.ts";
+import { abortFold, HIDE_AFTER_MS, STOW_MS, shouldResetIdle, stepHide, type HideView } from "./autoHide.ts";
 
 function view(patch: Partial<HideView>): HideView {
   return {
@@ -29,8 +29,22 @@ test("shown island hides only after the idle wait", () => {
   assert.equal(stepHide(view({ idleMs: HIDE_AFTER_MS })).kind, "begin-stow");
 });
 
-test("pointer remind hint and login do not stop the countdown for good", () => {
-  for (const key of ["hover", "remind", "hint", "login"] as const) {
+test("a campus hint or login line does not pin the island open", () => {
+  assert.equal(stepHide(view({ hint: true, idleMs: HIDE_AFTER_MS })).kind, "begin-stow");
+  assert.equal(stepHide(view({ login: true, idleMs: HIDE_AFTER_MS })).kind, "begin-stow");
+  assert.equal(stepHide(view({ hint: true, phase: "stowing", stowMs: STOW_MS })).kind, "finish-hide");
+  assert.equal(stepHide(view({ login: true, phase: "stowing", stowMs: STOW_MS })).kind, "finish-hide");
+  assert.equal(abortFold({
+    superseded: false,
+    remind: false,
+    fullscreen: false,
+    autoHide: true,
+    hover: false,
+  }), false);
+});
+
+test("pointer and remind pause the countdown until they clear", () => {
+  for (const key of ["hover", "remind"] as const) {
     const step = stepHide(view({ [key]: true, idleMs: HIDE_AFTER_MS }));
     assert.deepEqual(step, { kind: "wait", resetIdle: true });
   }
@@ -38,11 +52,17 @@ test("pointer remind hint and login do not stop the countdown for good", () => {
   assert.deepEqual(after, { kind: "wait", resetIdle: false });
 });
 
-test("stow cancels instead of hiding when blocked", () => {
-  assert.equal(stepHide(view({ phase: "stowing", stowMs: STOW_MS, hint: true })).kind, "cancel-stow");
-  assert.equal(stepHide(view({ phase: "stowing", stowMs: STOW_MS, login: true })).kind, "cancel-stow");
+test("stow cancels instead of hiding when the pointer or a reminder is up", () => {
   assert.equal(stepHide(view({ phase: "stowing", stowMs: STOW_MS, hover: true })).kind, "cancel-stow");
+  assert.equal(stepHide(view({ phase: "stowing", stowMs: STOW_MS, remind: true })).kind, "cancel-stow");
   assert.equal(stepHide(view({ phase: "stowing", stowMs: 2001 })).kind, "cancel-stow");
+  assert.equal(abortFold({
+    superseded: true,
+    remind: false,
+    fullscreen: false,
+    autoHide: true,
+    hover: false,
+  }), true);
 });
 
 test("stow finishes only after the fold", () => {

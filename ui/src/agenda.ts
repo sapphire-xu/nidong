@@ -108,9 +108,10 @@ export function repeatText(a: Agenda | undefined): string {
     const order = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
     detail = [...(rule.byday || [])].sort((x, y) => order.indexOf(x) - order.indexOf(y)).map((d) => BYDAY_LABEL[d] || d).join("、");
   }
-  let end = "";
-  if (rule.endmode === "DATE" && rule.time) end = `到 ${rule.time.slice(0, 10)}`;
-  if (rule.endmode === "NUMBER" && rule.num) end = `${rule.num} 次`;
+  if (rule.endmode === "NUMBER" && rule.num) {
+    return [`重复 ${rule.num} 次`, freq, detail].filter(Boolean).join(" ");
+  }
+  const end = rule.endmode === "DATE" && rule.time ? `到 ${rule.time.slice(0, 10)}` : "";
   return [freq, detail, end].filter(Boolean).join(" ");
 }
 

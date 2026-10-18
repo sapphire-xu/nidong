@@ -34,8 +34,26 @@ export type HideStep =
   | { kind: "finish-hide" }
   | { kind: "fullscreen-hide" };
 
-function blocked(s: HideView): boolean {
-  return s.hover || s.remind || s.hint || s.login;
+/**
+ * 按住不收的只有指针和上课提醒。
+ * 校园网提示、登录和同步只在新到的那一下重算 3 秒，句子还在岛上也不许把计时清掉。
+ */
+function holdingOpen(s: HideView): boolean {
+  return s.hover || s.remind;
+}
+
+/**
+ * 这一次收起要不要作废。
+ * 已经显示着的校园网提示和登录文案不作废；新的一句由调用方改掉代次。
+ */
+export function abortFold(s: {
+  superseded: boolean;
+  remind: boolean;
+  fullscreen: boolean;
+  autoHide: boolean;
+  hover: boolean;
+}): boolean {
+  return s.superseded || s.remind || s.fullscreen || !s.autoHide || s.hover;
 }
 
 /**
@@ -72,11 +90,11 @@ export function stepHide(s: HideView): HideStep {
     return { kind: "wait", resetIdle: false };
   }
   if (s.phase === "stowing") {
-    if (blocked(s) || s.stowMs > 2000) return { kind: "cancel-stow" };
+    if (holdingOpen(s) || s.stowMs > 2000) return { kind: "cancel-stow" };
     if (s.stowMs >= STOW_MS) return { kind: "finish-hide" };
     return { kind: "wait", resetIdle: false };
   }
-  if (blocked(s)) return { kind: "wait", resetIdle: true };
+  if (holdingOpen(s)) return { kind: "wait", resetIdle: true };
   if (s.idleMs < HIDE_AFTER_MS) return { kind: "wait", resetIdle: false };
   return { kind: "begin-stow" };
 }
