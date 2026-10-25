@@ -1,11 +1,11 @@
 {
-  "version": "2.4.0",
-  "notes": "更新了滚木滚木滚木滚木滚木滚木以及不再使用位置",
-  "pub_date": "2026-10-19T02:00:31Z",
+  "version": "2.4.1",
+  "notes": "更新一下流量速度显示",
+  "pub_date": "2026-10-25T15:07:19Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZHhvNlFqU0tRSVAwUmgyTVpLajAvK29GV2FDUW8rb0Q1czV6Wmo0UWFKdktvcVhWY0FhaVVZY29BUlRDVkdlTWdEd3FQQjE2UEY0eUhTME0yeWVramdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMzc1MjMxCWZpbGU65rOl5rSeXzIuNC4wX3g2NC1zZXR1cC5leGUKY2dkZlNzTE16eEpvMHZkT3dKUkRraGNpalgvQSt2bFNRV2xpU0dxYlBabUQxU1RqUzhOd0hRN0gvc01QTnM1WFdHejRqT3dRVVpCN1FHVXArQW96QVE9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.4.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDliaHlqcTFzZEVGY1VlN2tScDUyUm8yNTVUd3NsaXJLQ0o5US9Oc00zU1VyNUVyZjlmRkJHUmZnMXNBZHBUQmF5Y3JGOW85UkJxck1EVmE1TnZKWmdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTQwODM5CWZpbGU65rOl5rSeXzIuNC4xX3g2NC1zZXR1cC5leGUKamk5QVgrYlZzN0dXeGFlUXgrN21ZKzQvYjJwSk1mUlVRUFBHUTBURlZ2Ry9TZ0w3K3FNTk8xOTE0VDVsM2RKSW8waWFlQ29rVldGTG1uRFB1VkN0QVE9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.4.1_x64-setup.exe"
     }
   }
 }
