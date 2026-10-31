@@ -51,7 +51,7 @@ nidong/
       pages/Settings.tsx   设置页外壳，内容转给 SettingsPanel
       pages/Doors.tsx      任意门
       pages/Home.tsx       主页
-      pages/Toolbox.tsx    工具箱。校园网自动登录、免流文件分享
+      pages/Toolbox.tsx    工具箱。校园网自动登录、免流文件分享、防社死设置
       pages/Share.tsx      免流文件分享：本机网页、口令、拖放和添加文件
       pages/NetPanel.tsx   网费页：计费规则、本机流量记录
       updateCheck.ts      向 Gitee 检查新版本，失败只返回 failed
@@ -68,6 +68,7 @@ nidong/
     campus.rs        校园网五种模式的监视循环，提示发 `campus-hint`
     wlan.rs          Windows wlanapi，按配置名连接
     meter_cmd.rs     网费页开关本机流量记录。计数在 src-tauri/meter
+    smart_mute.rs    防社死 · 智能静音。默认输出静音、无音频计时、课程/日程时间段
     ipgw.rs          网关登录。单独客户端，不打开浏览器
     client.rs        CAS / 卡 / 网 / 电 / 账单
     course.rs        教务 JSON → SemesterTable，以及该不该打教务
@@ -214,6 +215,7 @@ nidong/
 | 自定义日程 | `ui/src/EventForm.tsx` + `agenda.ts` + `src-tauri/src/agenda.rs` |
 | 登录、卡、网、电、账单 | `src-tauri/src/client.rs` |
 | 网费计费说明、本机流量记录 | `ui/src/desk/pages/NetPanel.tsx`。0:00–6:00 不计费是这段文案，和电费夜里缓存不是一回事。记录进程在 `src-tauri/meter` |
+| 防社死 · 智能静音 | 页面 `ui/src/desk/pages/Toolbox.tsx`，看护 `src-tauri/src/smart_mute.rs`，字段在 `models.rs` / `types.ts` |
 | 教务课表解析、每天打一次 | `src-tauri/src/course.rs`（规则见下） |
 | 托盘、`open_desk`、刷新编排 | `src-tauri/src/lib.rs` |
 | 岛的颜色和圆角 | `ui/src/styles.css` |
@@ -246,7 +248,7 @@ nidong/
 
 只在校园网记账：无线名与自动登录同一组（`NEU` / `NEU-2.4G` / `NEU-Mobile` + 设置里的名称；`NEUQ` 不算），或本机 `172.22.0.0/16` / `2001:da8:9000::/48`。不要改成「能连上教务」。不在校园网仍采样，只挪基线。
 
-账本 `%APPDATA%\edu.neu.nidong\meter\`，一天一行五项（白天校外 IPv4 下载、夜里 IPv4 下载、IPv4 上传、IPv6 下载、IPv6 上传）。校内 IPv4 下载不进表。TCP 和 UDP 用提权进程里的 Microsoft-Windows-Kernel-Network 事件，并进这五项。TCP 是 10、11、14 和 26、27、30，UDP 是 42、43、58、59。size 从第 4 个字节读。事件 26、27、30、58、59 里如果没有真正的 IPv6 地址、只有 `::ffff:` 映射地址，那是双栈套接字上的 IPv4，不进 IPv6，留给同一次传输的 IPv4 事件。会话正常时这一轮只用这些事件，不再叠 TCP 连接计数。会话名 `NidongMeterUdp`，进程退出就关掉。某一轮 EventsLost 增加，这一轮事件不写入，TCP 退回连接计数，网费页说明这一段不完整。会话没接上时速度仍只有 TCP 连接计数，网费页说明 UDP 没有接上。ETW 失败不要写 `error.txt`。全 0 的日子不写、不补。开了记录后规则和日志进子页；日志页可打开 `usage.txt`。网费页速度仍写「校外 IPv4 下载」「校外 IPv6 下载」，白天计费、夜里免费，不显示上传速度。正在记录且人在校园网时，校内 IPv4 和对外 IPv4 同一行，IPv6 仍单独一行。对外地址由主进程问一个只回 IPv4 的回显，成功缓存 3 分钟；失败沿用 30 分钟内的上次结果，没有就写「没有读到」。不要把这次查询放进 `nidong-meter` 的两秒循环。主页网费卡右下角在流量记录开启时有一枚不大的「监控中」，颜色跟免流分享药丸一样，不要做成按钮。门户 `sum_bytes` 仍叫「校园网记录」。`--run` 没管理员就安静退出，不要写 `error.txt`，也不要用读失败比例弹警告。`nidong-meter.exe` 用 windows 子系统，不要弹控制台。按钮跟免流文件分享：次要 `secondary`，开启 `primary`，关闭用警告黄。五项列表等宽。
+账本 `%APPDATA%\edu.neu.nidong\meter\`，一天一行五项（白天校外 IPv4 下载、夜里 IPv4 下载、IPv4 上传、IPv6 下载、IPv6 上传）。校内 IPv4 下载不进表。TCP 和 UDP 用提权进程里的 Microsoft-Windows-Kernel-Network 事件，并进这五项。TCP 是 10、11、14 和 26、27、30，UDP 是 42、43、58、59。size 从第 4 个字节读。事件 26、27、30、58、59 里如果没有真正的 IPv6 地址、只有 `::ffff:` 映射地址，那是双栈套接字上的 IPv4，不进 IPv6，留给同一次传输的 IPv4 事件。会话正常时这一轮只用这些事件，不再叠 TCP 连接计数。会话名 `NidongMeterUdp`，进程退出就关掉。某一轮 EventsLost 增加，这一轮事件不写入，TCP 退回连接计数，网费页说明这一段不完整。会话没接上时速度仍只有 TCP 连接计数，网费页说明 UDP 没有接上。ETW 失败不要写 `error.txt`。全 0 的日子不写、不补。开了记录后规则和日志进子页；日志页可打开 `usage.txt`。网费页实时框写四格速度：校外 IPv4 下载（白天计费、夜里免费）、校外 IPv6 下载、校内下载、上传。「校园网记录的流量」那一行右侧有「显示详细」开关，展开后校外下载按 TCP / UDP 拆，校内下载和上传按 IPv4 / IPv6 拆。校内 IPv4 下载按两端都不是公网地址的下载算（与账本排除规则一致），IPv6 校内按对端在 `2001:da8:9000::/48` 算；账本里的 IPv6 下载仍是校内加校外。详细里的 UDP 在会话没接上或事件丢失时为 0。正在记录且人在校园网时，校内 IPv4 和对外 IPv4 同一行，IPv6 仍单独一行。对外地址由主进程问一个只回 IPv4 的回显，成功缓存 3 分钟；失败沿用 30 分钟内的上次结果，没有就写「没有读到」。不要把这次查询放进 `nidong-meter` 的两秒循环。主页网费卡右下角在流量记录开启时有一枚不大的「监控中」，颜色跟免流分享药丸一样，不要做成按钮。门户 `sum_bytes` 仍叫「校园网记录」。`--run` 没管理员就安静退出，不要写 `error.txt`，也不要用读失败比例弹警告。`nidong-meter.exe` 用 windows 子系统，不要弹控制台。按钮跟免流文件分享：次要 `secondary`，开启 `primary`，关闭用警告黄。五项列表等宽。
 
 ## 网费「已用 0B」
 
@@ -272,6 +274,7 @@ nidong/
 - 不要按 prototype 把导航改回五项、把电费夜里逻辑改回跳过查询。界面改造计划已删
 - 不要把 `%USERPROFILE%\.tauri\nidong.key` 写进仓库、Gitee 或 GitHub。公钥已经在 `tauri.conf.json`，私钥丢了之后发出去的安装包收不到后续更新
 - 不要在检查更新失败时弹窗、改岛或挡住主页。正式包打开窗口时静默检查；只有关于页手动检查失败才写「暂时检查不到更新」
+- 不要在智能静音关闭时动系统静音，不要改音量，也不要在用户手动取消静音后立刻又静音
 - 不要发现新版本就自动下载。下载只发生在用户点「更新并重启」之后
 
 ## 托盘
@@ -287,6 +290,20 @@ nidong/
 网关登录只读「记住密码」放进系统凭据的一号通密码；关掉记住密码会删掉密码，这时仍可连接无线，岛上写「先记住密码」。连接和登录的短句发 `campus-hint`，岛中间换成这句并露出来，不弹窗，不打开网关页。失败也不要做图形码识别。
 
 同名无线不算数。提交密码之前先访问 `https://pass.neu.edu.cn`，证书必须由系统信任，`danger_accept_invalid_certs` 保持关闭。密码只加密后 POST 到主机名恰好是 `pass.neu.edu.cn` 的 https（443，不能带用户名）。公钥只取这次页面，或程序里的学校公钥；脚本地址若不是这个主机，就用程序里的公钥，不要跟着别的网址走。证书无效、登录页落到别的主机、或表单要发到别的地址，返回「这不是校园网」，岛上写「这不是校园网，密码没提交」，断开当前无线，并暂停大约一分钟（40 个轮询）不再连接、不再登录。假热点若把流量原样转到学校服务器，密码会交到学校，假热点看不到明文。`http://ipgw.neu.edu.cn` 只用来看在线状态和交票据，票据只认 `pass.neu.edu.cn` 或 `ipgw.neu.edu.cn` 返回的，不要把密码写进这个 http 请求。
+
+## 防社死 · 智能静音
+
+工具箱第三格「防社死设置」，二级页里先有「智能静音」一类。三个开关默认都关。字段在 `AppSettings`：`smartMuteIdle`、`smartMuteIdleMinutes`（20–200，旧配置缺字段按 60）、`smartMuteClass`、`smartMuteAgenda`。页面上的阈值滑条（右侧带数字框，和设置页低余额阈值同一套）只在「长时间无音频自动静音」打开时出现。
+
+看护在 `src-tauri/src/smart_mute.rs` 的独立线程里，约每秒一次：
+
+- 用 WASAPI 打开**系统默认输出设备**，只 `SetMute`，不改音量。峰值高于约 -66 dBFS 算有音频。
+- 课程用 snapshot 里的 `semester` + 设置里的第一周周一算教学周，再取当天课程；日程用 snapshot 里的 `agenda`，重复按 `agenda.ts` 同一套规则展开（每天、按星期、按次数/结束日；跨天重复退化成单段）。
+- 进入时间段就静音，离开时间段恢复进入前的静音状态。手动取消静音后，本段课程/日程、或这一次无音频静音不再动手，不去和用户抢静音键。无音频计时从手动取消时重算。
+- 设置全关或退出泥洞时，如果静音是泥洞加上的，恢复原状。退出最多等 1.5 秒；进程被强杀时恢复不了。
+- 非 Windows 构建没有静音实现，只有纯逻辑测试。
+
+不要默认打开任何一项，不要把「静音」做成调低音量，也不要在用户手动取消后立刻又静音。
 
 ## 免流文件分享
 

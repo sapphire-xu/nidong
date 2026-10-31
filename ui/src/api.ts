@@ -65,6 +65,14 @@ export type MeterStatus = {
   ipv6: string;
   v4DownBps: number;
   v6DownBps: number;
+  v4DownTcpBps: number;
+  v4DownUdpBps: number;
+  v4DownCampusBps: number;
+  v6DownTcpBps: number;
+  v6DownUdpBps: number;
+  v6DownCampusBps: number;
+  v4UpBps: number;
+  v6UpBps: number;
   night: boolean;
   elevated: boolean;
   udpReady: boolean;

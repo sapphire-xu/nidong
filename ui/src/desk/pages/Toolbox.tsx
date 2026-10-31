@@ -1,8 +1,10 @@
-import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Dropdown, Field, Input, Option } from "@fluentui/react-components";
-import { BookOpen20Regular, Clock20Regular, Share20Regular, Wifi120Regular } from "@fluentui/react-icons";
+import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Dropdown, Field, Input, Option, Switch } from "@fluentui/react-components";
+import { Clock20Regular, Share20Regular, SpeakerMute20Regular, Wifi120Regular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../../api";
+import { clampIdleMinutes } from "../../prefs";
 import type { AppSettings } from "../../types";
+import { Threshold } from "../../Threshold";
 import { SharePanel } from "./Share";
 
 const MODES: { value: NonNullable<AppSettings["campusWifiMode"]>; text: string }[] = [
@@ -27,12 +29,11 @@ function isCampusNet(name: string, configured: string) {
 
 const LATER: { icon: ReactNode }[] = [
   { icon: <Clock20Regular /> },
-  { icon: <BookOpen20Regular /> },
 ];
 
 export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSettings) => void; openShare?: number }) {
   const { settings, setSettings, openShare } = props;
-  const [page, setPage] = useState<"hub" | "campus" | "share">(openShare ? "share" : "hub");
+  const [page, setPage] = useState<"hub" | "campus" | "share" | "mute">(openShare ? "share" : "hub");
   const [motion, setMotion] = useState<"idle" | "back">("idle");
   const sharePanelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -45,7 +46,7 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
     void el.offsetWidth;
     el.classList.add("settings-sub-content");
   }, [openShare]);
-  const openPage = (next: "hub" | "campus" | "share") => {
+  const openPage = (next: "hub" | "campus" | "share" | "mute") => {
     setMotion(next === "hub" && page !== "hub" ? "back" : "idle");
     setPage(next);
   };
@@ -59,6 +60,7 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
   const campusName = (settings.campusWifiSsid || "").trim() || "NEU";
   const hotspotName = (settings.campusHotspotSsid || "").trim();
   const hotspotIsCampus = isCampusNet(hotspotName, campusName);
+  const idleMinutes = clampIdleMinutes(settings.smartMuteIdleMinutes);
 
   async function fillCurrent() {
     if (filling) return;
@@ -84,7 +86,7 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
           <div className="settings-breadcrumb">
             <button type="button" className="settings-breadcrumb-link" onClick={() => openPage("hub")}>工具箱</button>
             <span aria-hidden="true">›</span>
-            <h1 className="page-title">{page === "campus" ? "校园网自动登录" : "免流文件分享"}</h1>
+            <h1 className="page-title">{page === "campus" ? "校园网自动登录" : page === "share" ? "免流文件分享" : "防社死设置"}</h1>
           </div>
         )}
       </div>
@@ -98,6 +100,10 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
             <span className="tool-ico" aria-hidden="true"><Share20Regular /></span>
             <span className="tool-name">免流文件分享</span>
           </button>
+          <button type="button" className="tool-tile on" onClick={() => openPage("mute")}>
+            <span className="tool-ico" aria-hidden="true"><SpeakerMute20Regular /></span>
+            <span className="tool-name">防社死设置</span>
+          </button>
           {LATER.map((item, i) => (
             <button key={i} type="button" className="tool-tile is-wait" disabled>
               <span className="tool-ico" aria-hidden="true">{item.icon}</span>
@@ -109,6 +115,58 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
       {page === "share" ? (
         <div ref={sharePanelRef} className="tool-panel settings-sub-content">
           <SharePanel settings={settings} onSettings={set} />
+        </div>
+      ) : null}
+      {page === "mute" ? (
+        <div className="tool-panel settings-sub-content">
+          <p className="hint">以下开关默认关闭，静音作用于系统默认输出设备。</p>
+          <section className="mute-group" aria-labelledby="smart-mute-title">
+            <div className="mute-head">
+              <span className="mute-icon" aria-hidden="true"><SpeakerMute20Regular /></span>
+              <div className="mute-copy">
+                <h2 id="smart-mute-title" className="mute-title">智能静音</h2>
+                <p className="hint">离开电脑、上课或日程中，自动静音。</p>
+              </div>
+            </div>
+            <div className="mute-body">
+              <div className="mute-item">
+                <Switch
+                  label="长时间无音频自动静音"
+                  checked={!!settings.smartMuteIdle}
+                  onChange={(_, data) => set({ smartMuteIdle: data.checked })}
+                />
+                {settings.smartMuteIdle ? (
+                  <div className="mute-window">
+                    <Threshold
+                      label="无音频多久后静音（分钟）"
+                      value={idleMinutes}
+                      min={20}
+                      max={200}
+                      onCommit={(minutes) => set({ smartMuteIdleMinutes: clampIdleMinutes(minutes) })}
+                    />
+                    <p className="hint">可以调 20–200 分钟。手动取消静音后重新计时。</p>
+                  </div>
+                ) : null}
+              </div>
+              <div className="mute-item">
+                <Switch
+                  label="课程自动静音"
+                  checked={!!settings.smartMuteClass}
+                  onChange={(_, data) => set({ smartMuteClass: data.checked })}
+                />
+                <p className="hint">按本学期课表，在上课时间段内静音。</p>
+              </div>
+              <div className="mute-item">
+                <Switch
+                  label="日程自动静音"
+                  checked={!!settings.smartMuteAgenda}
+                  onChange={(_, data) => set({ smartMuteAgenda: data.checked })}
+                />
+                <p className="hint">在自定义日程的起止时间内静音。</p>
+              </div>
+            </div>
+          </section>
+          <p className="hint">手动取消静音后，本段课程、日程或这次无音频静音不再动手。</p>
         </div>
       ) : null}
       {page === "campus" ? (

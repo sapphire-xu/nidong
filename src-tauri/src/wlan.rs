@@ -1,4 +1,5 @@
 //! Windows WLAN via wlanapi. 校园网连接不走 netsh，避免无控制台进程拉起 netsh 失败。
+//! 当前无线名用 GetConnectedSsid，不用 WlanQueryInterface(current_connection)，否则任务栏会显示正在使用位置。
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WlanNow {
@@ -44,8 +45,7 @@ pub fn disconnect() -> Result<(), String> {
 #[cfg(windows)]
 unsafe fn query_inner() -> Result<WlanNow, String> {
     use windows::Win32::NetworkManagement::WiFi::{
-        WlanCloseHandle, WlanFreeMemory, WlanQueryInterface, WLAN_CONNECTION_ATTRIBUTES,
-        WLAN_INTERFACE_INFO, wlan_interface_state_connected, wlan_intf_opcode_current_connection,
+        WlanCloseHandle, WlanFreeMemory, wlan_interface_state_connected,
     };
 
     let handle = open_handle()?;
@@ -57,44 +57,17 @@ unsafe fn query_inner() -> Result<WlanNow, String> {
         return Ok(WlanNow { connected: false, ssid: String::new(), has_adapter: false });
     }
     let base = unsafe { std::ptr::addr_of!((*list).InterfaceInfo[0]) };
-    let mut chosen: *const WLAN_INTERFACE_INFO = base;
+    let mut connected = false;
     for i in 0..n {
         let info = unsafe { &*base.add(i) };
         if info.isState == wlan_interface_state_connected {
-            chosen = info;
+            connected = true;
             break;
-        }
-    }
-    let info = unsafe { &*chosen };
-    let connected = info.isState == wlan_interface_state_connected;
-    let guid = info.InterfaceGuid;
-    let mut ssid = String::new();
-    if connected {
-        let mut size = 0u32;
-        let mut data = std::ptr::null_mut();
-        let rc = unsafe {
-            WlanQueryInterface(
-                handle,
-                &guid,
-                wlan_intf_opcode_current_connection,
-                None,
-                &mut size,
-                &mut data,
-                None,
-            )
-        };
-        if rc == 0 && !data.is_null() {
-            let conn = unsafe { &*(data as *const WLAN_CONNECTION_ATTRIBUTES) };
-            if conn.isState == wlan_interface_state_connected {
-                ssid = ssid_text(&conn.wlanAssociationAttributes.dot11Ssid);
-            }
-        }
-        if !data.is_null() {
-            unsafe { WlanFreeMemory(data.cast()); }
         }
     }
     unsafe { WlanFreeMemory(list.cast()); }
     let _ = unsafe { WlanCloseHandle(handle, None) };
+    let ssid = if connected { nidong_meter::connected_ssid() } else { String::new() };
     Ok(WlanNow { connected, ssid, has_adapter: true })
 }
 
@@ -197,10 +170,4 @@ unsafe fn enum_interfaces(handle: windows::Win32::Foundation::HANDLE) -> Result<
         return Err("没有无线网卡".into());
     }
     Ok(list)
-}
-
-#[cfg(windows)]
-fn ssid_text(ssid: &windows::Win32::NetworkManagement::WiFi::DOT11_SSID) -> String {
-    let n = (ssid.uSSIDLength as usize).min(ssid.ucSSID.len());
-    String::from_utf8_lossy(&ssid.ucSSID[..n]).trim_matches('\u{0}').trim().to_string()
 }

@@ -14,10 +14,10 @@ if-addrs = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 windows = { version = "0.61", features = [
+    "Networking_Connectivity",
     "Win32_Foundation",
-    "Win32_NetworkManagement_Ndis",
-    "Win32_NetworkManagement_WiFi",
     "Win32_System_Diagnostics_Etw",
     "Win32_System_Time",
+    "Win32_System_WinRT",
     "Win32_UI_Shell",
 ] }

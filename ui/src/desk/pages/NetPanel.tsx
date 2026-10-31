@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle } from "@fluentui/react-components";
+import { useEffect, useState, type ReactNode } from "react";
+import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Switch } from "@fluentui/react-components";
 import { api, type MeterDay, type MeterStatus, type MeterTotals } from "../../api";
 import { formatBytes } from "../../format";
 
@@ -68,6 +68,31 @@ function AddrRow(props: { label: string; value: string; empty?: string }) {
   );
 }
 
+function RateCard(props: { label: ReactNode; total: number; parts?: { name: string; value: number }[] }) {
+  return (
+    <div className="net-rate">
+      <div className="k">{props.label}</div>
+      {props.parts ? (
+        <div className="net-formula num">
+          {props.parts.map((part, i) => (
+            <span className="term" key={part.name}>
+              {i > 0 ? <span className="op">+</span> : null}
+              <span className="name">{part.name}</span>
+              <b>{formatRate(part.value)}</b>
+            </span>
+          ))}
+          <span className="term">
+            <span className="op">=</span>
+            <b className="total">{formatRate(props.total)}</b>
+          </span>
+        </div>
+      ) : (
+        <div className="v num">{formatRate(props.total)}</div>
+      )}
+    </div>
+  );
+}
+
 function MeterTable(props: { today: MeterTotals | null; month: MeterTotals | null }) {
   const rows: { label: string; totals: MeterTotals | null }[] = [
     { label: "本日", totals: props.today },
@@ -112,6 +137,7 @@ export function NetPanel(props: { portalBytes?: number; portalKnown: boolean }) 
   const [err, setErr] = useState("");
   const [days, setDays] = useState<MeterDay[] | null>(null);
   const [outerV4, setOuterV4] = useState<string | null>(null);
+  const [detail, setDetail] = useState(false);
 
   useEffect(() => {
     let stop = false;
@@ -276,21 +302,48 @@ export function NetPanel(props: { portalBytes?: number; portalKnown: boolean }) 
               </div>
               <AddrRow label="IPv6" value={status.ipv6} />
               <div className="net-rates">
-                <div className="net-rate">
-                  <div className="k">校外 IPv4 下载{status.night ? <span className="net-tag free">免费</span> : <span className="net-tag bill">计费</span>}</div>
-                  <div className="v num">{formatRate(status.v4DownBps)}</div>
-                </div>
-                <div className="net-rate">
-                  <div className="k">校外 IPv6 下载</div>
-                  <div className="v num">{formatRate(status.v6DownBps)}</div>
-                </div>
+                <RateCard
+                  label={<>校外 IPv4 下载{status.night ? <span className="net-tag free">免费</span> : <span className="net-tag bill">计费</span>}</>}
+                  total={status.v4DownBps}
+                  parts={detail ? [
+                    { name: "TCP", value: status.v4DownTcpBps },
+                    { name: "UDP", value: status.v4DownUdpBps },
+                  ] : undefined}
+                />
+                <RateCard
+                  label="校外 IPv6 下载"
+                  total={status.v6DownBps}
+                  parts={detail ? [
+                    { name: "TCP", value: status.v6DownTcpBps },
+                    { name: "UDP", value: status.v6DownUdpBps },
+                  ] : undefined}
+                />
+                <RateCard
+                  label="校内下载"
+                  total={status.v4DownCampusBps + status.v6DownCampusBps}
+                  parts={detail ? [
+                    { name: "IPv4", value: status.v4DownCampusBps },
+                    { name: "IPv6", value: status.v6DownCampusBps },
+                  ] : undefined}
+                />
+                <RateCard
+                  label="上传"
+                  total={status.v4UpBps + status.v6UpBps}
+                  parts={detail ? [
+                    { name: "IPv4", value: status.v4UpBps },
+                    { name: "IPv6", value: status.v6UpBps },
+                  ] : undefined}
+                />
               </div>
               {status.udpGap ? (
                 <p className="hint warn">这一段事件丢了，UDP 没有写入。TCP 按连接计数补上。</p>
               ) : status.udpReady ? null : (
                 <p className="hint">UDP 没有接上，隧道里的流量不会出现在上面的速度里。</p>
               )}
-              <p className="net-portal">校园网记录的流量 {props.portalKnown && props.portalBytes != null ? formatBytes(props.portalBytes) : "—"}</p>
+              <div className="net-portal-row">
+                <p className="net-portal">校园网记录的流量 {props.portalKnown && props.portalBytes != null ? formatBytes(props.portalBytes) : "—"}</p>
+                <Switch checked={detail} onChange={(_, data) => setDetail(data.checked)} label="显示详细" />
+              </div>
             </div>
           ) : (
             <div className="net-live muted">
@@ -303,7 +356,7 @@ export function NetPanel(props: { portalBytes?: number; portalKnown: boolean }) 
           <div className="net-sheet">
             <MeterTable today={status.today} month={status.month} />
           </div>
-          <p className="src">上面的「校园网记录」是门户上的本月合计。表里是这台电脑自己记的。校内 IPv4 下载不进表。TCP 和 UDP 并进这五列；某一轮事件丢了，这一轮的 UDP 不写。</p>
+          <p className="src">表格数据为本机记录流量，可能会与校园网记录有所偏差。</p>
           <hr className="net-split" />
           <div className="share-actions net-toolbar">
             <div className="net-toolbar-start">

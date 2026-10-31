@@ -17,7 +17,7 @@ struct SsidSetting {
 pub fn currently_on_campus() -> (bool, String, String) {
     let addrs = local_addrs();
     let (v4, v6) = pick_addrs(&addrs);
-    let ssid = current_ssid().unwrap_or_default();
+    let ssid = connected_ssid();
     let configured = configured_ssid();
     let on = on_campus_net(&ssid, &configured, &addrs);
     (on, v4, v6)
@@ -40,15 +40,17 @@ fn is_campus_ssid(name: &str, configured: &str) -> bool {
 
 fn is_campus_addr(addr: &IpAddr) -> bool {
     match addr {
-        IpAddr::V4(v) => {
-            let o = v.octets();
-            o[0] == 172 && o[1] == 22
-        }
-        IpAddr::V6(v) => {
-            let o = v.octets();
-            o[0] == 0x20 && o[1] == 0x01 && o[2] == 0x0d && o[3] == 0xa8 && o[4] == 0x90 && o[5] == 0x00
-        }
+        IpAddr::V4(v) => v4_is_campus(&v.octets()),
+        IpAddr::V6(v) => v6_is_campus(&v.octets()),
     }
+}
+
+pub(crate) fn v4_is_campus(o: &[u8; 4]) -> bool {
+    o[0] == 172 && o[1] == 22
+}
+
+pub(crate) fn v6_is_campus(o: &[u8; 16]) -> bool {
+    o[0] == 0x20 && o[1] == 0x01 && o[2] == 0x0d && o[3] == 0xa8 && o[4] == 0x90 && o[5] == 0x00
 }
 
 fn local_addrs() -> Vec<IpAddr> {
@@ -102,69 +104,51 @@ fn configured_ssid() -> String {
         .unwrap_or_default()
 }
 
-fn current_ssid() -> Result<String, String> {
-    unsafe { query_ssid() }
+pub fn connected_ssid() -> String {
+    current_ssid().unwrap_or_default()
 }
 
-unsafe fn query_ssid() -> Result<String, String> {
-    use windows::Win32::NetworkManagement::WiFi::{
-        WlanCloseHandle, WlanEnumInterfaces, WlanFreeMemory, WlanOpenHandle, WlanQueryInterface,
-        WLAN_CONNECTION_ATTRIBUTES, WLAN_INTERFACE_INFO_LIST, wlan_interface_state_connected,
-        wlan_intf_opcode_current_connection,
-    };
+fn current_ssid() -> Result<String, String> {
+    // GetConnectedSsid 只返回无线名。WlanQueryInterface(current_connection) 带接入点 BSSID，
+    // Windows 会把它记成正在使用位置。
+    ensure_winrt();
+    read_connected_ssid().map_err(|err| err.to_string())
+}
 
-    let mut negotiated = 0u32;
-    let mut handle = windows::Win32::Foundation::HANDLE::default();
-    if unsafe { WlanOpenHandle(2, None, &mut negotiated, &mut handle) } != 0 {
-        return Ok(String::new());
+fn ensure_winrt() {
+    unsafe {
+        let _ = windows::Win32::System::WinRT::RoInitialize(
+            windows::Win32::System::WinRT::RO_INIT_MULTITHREADED,
+        );
     }
-    let mut list: *mut WLAN_INTERFACE_INFO_LIST = std::ptr::null_mut();
-    if unsafe { WlanEnumInterfaces(handle, None, &mut list) } != 0 || list.is_null() {
-        let _ = unsafe { WlanCloseHandle(handle, None) };
-        return Ok(String::new());
-    }
-    let n = unsafe { (*list).dwNumberOfItems as usize };
-    let base = unsafe { std::ptr::addr_of!((*list).InterfaceInfo[0]) };
-    let mut ssid = String::new();
-    for i in 0..n {
-        let info = unsafe { &*base.add(i) };
-        if info.isState != wlan_interface_state_connected {
+}
+
+fn read_connected_ssid() -> windows::core::Result<String> {
+    use windows::Networking::Connectivity::{NetworkConnectivityLevel, NetworkInformation};
+
+    let profiles = NetworkInformation::GetConnectionProfiles()?;
+    let count = profiles.Size()?;
+    for i in 0..count {
+        let profile = profiles.GetAt(i)?;
+        let level = profile
+            .GetNetworkConnectivityLevel()
+            .unwrap_or(NetworkConnectivityLevel::None);
+        if level == NetworkConnectivityLevel::None {
             continue;
         }
-        let mut size = 0u32;
-        let mut data = std::ptr::null_mut();
-        let rc = unsafe {
-            WlanQueryInterface(
-                handle,
-                &info.InterfaceGuid,
-                wlan_intf_opcode_current_connection,
-                None,
-                &mut size,
-                &mut data,
-                None,
-            )
+        if !profile.IsWlanConnectionProfile().unwrap_or(false) {
+            continue;
+        }
+        let Ok(details) = profile.WlanConnectionProfileDetails() else {
+            continue;
         };
-        if rc == 0 && !data.is_null() {
-            let conn = unsafe { &*(data as *const WLAN_CONNECTION_ATTRIBUTES) };
-            if conn.isState == wlan_interface_state_connected {
-                let raw = &conn.wlanAssociationAttributes.dot11Ssid;
-                let len = (raw.uSSIDLength as usize).min(raw.ucSSID.len());
-                ssid = String::from_utf8_lossy(&raw.ucSSID[..len])
-                    .trim_matches('\u{0}')
-                    .trim()
-                    .to_string();
-            }
-        }
-        if !data.is_null() {
-            unsafe { WlanFreeMemory(data.cast()) };
-        }
-        if !ssid.is_empty() {
-            break;
+        let text = details.GetConnectedSsid()?.to_string();
+        let text = text.trim().trim_matches('\u{0}').to_string();
+        if !text.is_empty() {
+            return Ok(text);
         }
     }
-    unsafe { WlanFreeMemory(list.cast()) };
-    let _ = unsafe { WlanCloseHandle(handle, None) };
-    Ok(ssid)
+    Ok(String::new())
 }
 
 #[cfg(test)]
@@ -186,5 +170,11 @@ mod tests {
         assert!(!on_campus_net("NEUQ", "", &[outside]));
         assert!(!on_campus_net("CMCC", "", &[outside]));
         assert!(!on_campus_net("", "", &[outside]));
+    }
+
+    #[test]
+    fn connected_ssid_is_a_name_not_a_scan() {
+        let name = connected_ssid();
+        assert!(name.len() <= 32);
     }
 }

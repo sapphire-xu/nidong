@@ -19,7 +19,17 @@ export function withSettingDefaults(s: AppSettings): AppSettings {
     campusHotspotSsid: s.campusHotspotSsid || "",
     skipLogin: s.skipLogin === true,
     shareHintDismissed: s.shareHintDismissed === true,
+    smartMuteIdle: s.smartMuteIdle === true,
+    smartMuteIdleMinutes: clampIdleMinutes(s.smartMuteIdleMinutes),
+    smartMuteClass: s.smartMuteClass === true,
+    smartMuteAgenda: s.smartMuteAgenda === true,
   };
+}
+
+export function clampIdleMinutes(minutes: number | undefined) {
+  const v = Math.round(Number(minutes));
+  if (!Number.isFinite(v)) return 60;
+  return Math.min(200, Math.max(20, v));
 }
 
 export function clampVolume(volume: number | undefined) {

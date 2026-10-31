@@ -265,6 +265,18 @@ pub struct AppSettings {
     /// 免流文件分享的说明勾过不再提示。
     #[serde(default)]
     pub share_hint_dismissed: bool,
+    /// 防社死 · 长时间无音频后把系统输出静音。
+    #[serde(default)]
+    pub smart_mute_idle: bool,
+    /// 无音频多少分钟后静音，20–200。旧配置没有此字段时用 60。
+    #[serde(default = "default_smart_mute_idle_minutes")]
+    pub smart_mute_idle_minutes: u32,
+    /// 防社死 · 课程时间段内静音。
+    #[serde(default)]
+    pub smart_mute_class: bool,
+    /// 防社死 · 日程时间段内静音。
+    #[serde(default)]
+    pub smart_mute_agenda: bool,
 }
 
 impl Default for AppSettings {
@@ -295,6 +307,10 @@ impl Default for AppSettings {
             campus_hotspot_ssid: String::new(),
             skip_login: false,
             share_hint_dismissed: false,
+            smart_mute_idle: false,
+            smart_mute_idle_minutes: default_smart_mute_idle_minutes(),
+            smart_mute_class: false,
+            smart_mute_agenda: false,
         }
     }
 }
@@ -331,6 +347,10 @@ fn default_remind_volume() -> u32 {
     100
 }
 
+fn default_smart_mute_idle_minutes() -> u32 {
+    60
+}
+
 #[cfg(test)]
 mod settings_tests {
     use super::*;
@@ -350,6 +370,10 @@ mod settings_tests {
         let s: AppSettings = serde_json::from_str(raw).unwrap();
         assert!(!s.remind_sound);
         assert_eq!(s.remind_volume, 100);
+        assert!(!s.smart_mute_idle);
+        assert_eq!(s.smart_mute_idle_minutes, 60);
+        assert!(!s.smart_mute_class);
+        assert!(!s.smart_mute_agenda);
     }
 }
 

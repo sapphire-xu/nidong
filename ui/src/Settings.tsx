@@ -26,6 +26,7 @@ import {
   Window20Regular,
 } from "@fluentui/react-icons";
 import type { AppSettings, SemesterTable } from "./types";
+import { Threshold } from "./Threshold";
 
 type Page = "hub" | "appearance" | "dorm" | "schedule" | "account" | "panel" | "remind";
 
@@ -169,56 +170,6 @@ function HotkeyField({ value, onChange }: { value: string; onChange: (v: string)
     <Button appearance={capturing ? "primary" : "secondary"} onClick={() => setCapturing((v) => !v)}>
       {capturing ? "按下组合键…" : (value || "Ctrl+Q").replace(/\+/g, " + ")}
     </Button>
-  );
-}
-
-function Threshold({
-  label,
-  value,
-  max,
-  onCommit,
-}: {
-  label: string;
-  value: number;
-  max: number;
-  onCommit: (n: number) => void;
-}) {
-  const [draft, setDraft] = useState(String(value));
-  useEffect(() => setDraft(String(value)), [value]);
-
-  function commit(raw: string) {
-    const n = Math.min(max, Math.max(0, Math.round(Number(raw))));
-    if (Number.isFinite(n)) {
-      setDraft(String(n));
-      onCommit(n);
-    } else {
-      setDraft(String(value));
-    }
-  }
-
-  return (
-    <div className="threshold">
-      <Field label={`${label}：${value}`}>
-        <div className="threshold-control">
-          <Slider min={0} max={max} step={1} value={Math.min(value, max)} onChange={(_, data) => {
-            setDraft(String(data.value));
-            onCommit(data.value);
-          }} />
-          <Input
-            className="threshold-input"
-            type="number"
-            min={0}
-            max={max}
-            step={1}
-            value={draft}
-            aria-label={label}
-            onChange={(_, data) => setDraft(data.value)}
-            onBlur={() => commit(draft)}
-            onKeyDown={(e) => { if (e.key === "Enter") commit(draft); }}
-          />
-        </div>
-      </Field>
-    </div>
   );
 }
 

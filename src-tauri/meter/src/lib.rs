@@ -11,6 +11,7 @@ use serde::Serialize;
 
 use store::Totals;
 
+pub use place::connected_ssid;
 pub use store::Day;
 
 #[derive(Clone, Debug, Serialize)]
@@ -23,6 +24,14 @@ pub struct Status {
     pub ipv6: String,
     pub v4_down_bps: u64,
     pub v6_down_bps: u64,
+    pub v4_down_tcp_bps: u64,
+    pub v4_down_udp_bps: u64,
+    pub v4_down_campus_bps: u64,
+    pub v6_down_tcp_bps: u64,
+    pub v6_down_udp_bps: u64,
+    pub v6_down_campus_bps: u64,
+    pub v4_up_bps: u64,
+    pub v6_up_bps: u64,
     pub night: bool,
     pub elevated: bool,
     pub udp_ready: bool,
@@ -61,6 +70,14 @@ pub fn status() -> Status {
             ipv6: live.ipv6,
             v4_down_bps: live.v4_down_bps,
             v6_down_bps: live.v6_down_bps,
+            v4_down_tcp_bps: live.v4_down_tcp_bps,
+            v4_down_udp_bps: live.v4_down_udp_bps,
+            v4_down_campus_bps: live.v4_down_campus_bps,
+            v6_down_tcp_bps: live.v6_down_tcp_bps,
+            v6_down_udp_bps: live.v6_down_udp_bps,
+            v6_down_campus_bps: live.v6_down_campus_bps,
+            v4_up_bps: live.v4_up_bps,
+            v6_up_bps: live.v6_up_bps,
             night: live.night,
             elevated: live.elevated,
             udp_ready: live.udp_ready,
@@ -77,6 +94,14 @@ pub fn status() -> Status {
             ipv6: String::new(),
             v4_down_bps: 0,
             v6_down_bps: 0,
+            v4_down_tcp_bps: 0,
+            v4_down_udp_bps: 0,
+            v4_down_campus_bps: 0,
+            v6_down_tcp_bps: 0,
+            v6_down_udp_bps: 0,
+            v6_down_campus_bps: 0,
+            v4_up_bps: 0,
+            v6_up_bps: 0,
             night: false,
             elevated: false,
             udp_ready: false,

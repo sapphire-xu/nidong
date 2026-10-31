@@ -139,6 +139,11 @@ export type AppSettings = {
   campusHotspotSsid?: string;
   skipLogin?: boolean;
   shareHintDismissed?: boolean;
+  smartMuteIdle?: boolean;
+  /** 20–200。旧配置没有此字段时按 60。 */
+  smartMuteIdleMinutes?: number;
+  smartMuteClass?: boolean;
+  smartMuteAgenda?: boolean;
 };
 
 export type SavedCreds = {

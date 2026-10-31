@@ -50,6 +50,8 @@ windows-core = "0.61.2"
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
     "Win32_NetworkManagement_WiFi",
     "Win32_NetworkManagement_Ndis",
     "Win32_System_Com",
@@ -59,6 +61,7 @@ windows = { version = "0.61", features = [
     "Win32_System_Registry",
     "Win32_System_SystemServices",
     "Win32_System_Threading",
+    "Win32_System_Variant",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }

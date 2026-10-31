@@ -3,7 +3,9 @@
 
 use std::collections::HashMap;
 
+use crate::place::v6_is_campus;
 use crate::store::Totals;
+use crate::udp::Flow;
 
 const AF_INET: u32 = 2;
 const AF_INET6: u32 = 23;
@@ -156,6 +158,7 @@ pub struct Sampler {
 #[derive(Clone, Debug, Default)]
 pub struct Tick {
     pub totals: Totals,
+    pub breakdown: Flow,
     pub tcp: u32,
     pub bad: u32,
 }
@@ -223,8 +226,12 @@ impl Sampler {
                 } else {
                     tick.totals.v4_day += din;
                 }
+                tick.breakdown.v4_down_tcp += din;
+            } else {
+                tick.breakdown.v4_down_campus += din;
             }
             tick.totals.v4_up += dout;
+            tick.breakdown.v4_up += dout;
         }
     }
 
@@ -272,7 +279,13 @@ impl Sampler {
             };
             let (din, dout) = delta_of(&self.seen, still, key, inn, out);
             tick.totals.v6_down += din;
+            if v6_is_campus(&row.remote) {
+                tick.breakdown.v6_down_campus += din;
+            } else {
+                tick.breakdown.v6_down_tcp += din;
+            }
             tick.totals.v6_up += dout;
+            tick.breakdown.v6_up += dout;
         }
     }
 }

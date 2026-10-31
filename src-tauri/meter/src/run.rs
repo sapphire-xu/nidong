@@ -20,6 +20,14 @@ struct Live {
     ipv6: String,
     v4_down_bps: u64,
     v6_down_bps: u64,
+    v4_down_tcp_bps: u64,
+    v4_down_udp_bps: u64,
+    v4_down_campus_bps: u64,
+    v6_down_tcp_bps: u64,
+    v6_down_udp_bps: u64,
+    v6_down_campus_bps: u64,
+    v4_up_bps: u64,
+    v6_up_bps: u64,
     night: bool,
     elevated: bool,
     udp_ready: bool,
@@ -117,27 +125,35 @@ fn loop_sample() {
         let tick = sampler.poll(night);
         let udp = udp_watch.take(night);
         // 会话正常时 TCP 已在事件里。再叠连接计数会把长连接算两次。
-        let totals = if udp.ready && !udp.gap { udp.totals } else { tick.totals };
+        let events_ok = udp.ready && !udp.gap;
+        let totals = if events_ok { udp.totals } else { tick.totals };
+        let breakdown = if events_ok { udp.breakdown } else { tick.breakdown };
         let elapsed = last_poll.elapsed().as_secs_f64().max(0.2);
         last_poll = Instant::now();
         if on_campus {
             ledger.add(&day, totals);
         }
-        let v4_down = totals.v4_day + totals.v4_night;
-        let (v4_down_bps, v6_down_bps) = if on_campus {
-            (
-                (v4_down as f64 / elapsed) as u64,
-                (totals.v6_down as f64 / elapsed) as u64,
-            )
-        } else {
-            (0, 0)
+        let rate = |bytes: u64| -> u64 {
+            if on_campus {
+                (bytes as f64 / elapsed) as u64
+            } else {
+                0
+            }
         };
         write_live(&Live {
             on_campus,
             ipv4,
             ipv6,
-            v4_down_bps,
-            v6_down_bps,
+            v4_down_bps: rate(breakdown.v4_down_tcp + breakdown.v4_down_udp),
+            v6_down_bps: rate(breakdown.v6_down_tcp + breakdown.v6_down_udp),
+            v4_down_tcp_bps: rate(breakdown.v4_down_tcp),
+            v4_down_udp_bps: rate(breakdown.v4_down_udp),
+            v4_down_campus_bps: rate(breakdown.v4_down_campus),
+            v6_down_tcp_bps: rate(breakdown.v6_down_tcp),
+            v6_down_udp_bps: rate(breakdown.v6_down_udp),
+            v6_down_campus_bps: rate(breakdown.v6_down_campus),
+            v4_up_bps: rate(breakdown.v4_up),
+            v6_up_bps: rate(breakdown.v6_up),
             night,
             elevated: true,
             udp_ready: udp.ready,
@@ -182,6 +198,14 @@ pub fn read_live() -> Option<LiveOwned> {
         ipv6: v.get("ipv6").and_then(|x| x.as_str()).unwrap_or("").to_string(),
         v4_down_bps: v.get("v4DownBps").and_then(|x| x.as_u64()).unwrap_or(0),
         v6_down_bps: v.get("v6DownBps").and_then(|x| x.as_u64()).unwrap_or(0),
+        v4_down_tcp_bps: v.get("v4DownTcpBps").and_then(|x| x.as_u64()).unwrap_or(0),
+        v4_down_udp_bps: v.get("v4DownUdpBps").and_then(|x| x.as_u64()).unwrap_or(0),
+        v4_down_campus_bps: v.get("v4DownCampusBps").and_then(|x| x.as_u64()).unwrap_or(0),
+        v6_down_tcp_bps: v.get("v6DownTcpBps").and_then(|x| x.as_u64()).unwrap_or(0),
+        v6_down_udp_bps: v.get("v6DownUdpBps").and_then(|x| x.as_u64()).unwrap_or(0),
+        v6_down_campus_bps: v.get("v6DownCampusBps").and_then(|x| x.as_u64()).unwrap_or(0),
+        v4_up_bps: v.get("v4UpBps").and_then(|x| x.as_u64()).unwrap_or(0),
+        v6_up_bps: v.get("v6UpBps").and_then(|x| x.as_u64()).unwrap_or(0),
         night: v.get("night").and_then(|x| x.as_bool()).unwrap_or(false),
         elevated: v.get("elevated").and_then(|x| x.as_bool()).unwrap_or(true),
         udp_ready: v.get("udpReady").and_then(|x| x.as_bool()).unwrap_or(false),
@@ -196,6 +220,14 @@ pub struct LiveOwned {
     pub ipv6: String,
     pub v4_down_bps: u64,
     pub v6_down_bps: u64,
+    pub v4_down_tcp_bps: u64,
+    pub v4_down_udp_bps: u64,
+    pub v4_down_campus_bps: u64,
+    pub v6_down_tcp_bps: u64,
+    pub v6_down_udp_bps: u64,
+    pub v6_down_campus_bps: u64,
+    pub v4_up_bps: u64,
+    pub v6_up_bps: u64,
     pub night: bool,
     pub elevated: bool,
     pub udp_ready: bool,

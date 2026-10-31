@@ -17,6 +17,7 @@ use windows::Win32::System::Diagnostics::Etw::{
     WNODE_FLAG_TRACED_GUID,
 };
 
+use crate::place::v6_is_campus;
 use crate::sample::{ipv4_is_local, v6_is_global};
 use crate::store::Totals;
 
@@ -39,9 +40,13 @@ const EVENT_IDS: [u16; 10] = [
 ];
 const MAX_DATAGRAM: u32 = 1024 * 1024;
 
-static V4_DOWN: AtomicU64 = AtomicU64::new(0);
+static V4_DOWN_TCP: AtomicU64 = AtomicU64::new(0);
+static V4_DOWN_UDP: AtomicU64 = AtomicU64::new(0);
+static V4_DOWN_CAMPUS: AtomicU64 = AtomicU64::new(0);
+static V6_DOWN_TCP: AtomicU64 = AtomicU64::new(0);
+static V6_DOWN_UDP: AtomicU64 = AtomicU64::new(0);
+static V6_DOWN_CAMPUS: AtomicU64 = AtomicU64::new(0);
 static V4_UP: AtomicU64 = AtomicU64::new(0);
-static V6_DOWN: AtomicU64 = AtomicU64::new(0);
 static V6_UP: AtomicU64 = AtomicU64::new(0);
 static LOST_SEEN: AtomicU32 = AtomicU32::new(0);
 static GAP: AtomicBool = AtomicBool::new(false);
@@ -49,14 +54,19 @@ static READY: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Flow {
-    pub v4_down: u64,
+    pub v4_down_tcp: u64,
+    pub v4_down_udp: u64,
+    pub v4_down_campus: u64,
+    pub v6_down_tcp: u64,
+    pub v6_down_udp: u64,
+    pub v6_down_campus: u64,
     pub v4_up: u64,
-    pub v6_down: u64,
     pub v6_up: u64,
 }
 
 pub struct Sample {
     pub totals: Totals,
+    pub breakdown: Flow,
     pub ready: bool,
     pub gap: bool,
 }
@@ -78,9 +88,13 @@ impl Watch {
         READY.store(false, Ordering::SeqCst);
         GAP.store(false, Ordering::SeqCst);
         LOST_SEEN.store(0, Ordering::SeqCst);
-        V4_DOWN.store(0, Ordering::SeqCst);
+        V4_DOWN_TCP.store(0, Ordering::SeqCst);
+        V4_DOWN_UDP.store(0, Ordering::SeqCst);
+        V4_DOWN_CAMPUS.store(0, Ordering::SeqCst);
+        V6_DOWN_TCP.store(0, Ordering::SeqCst);
+        V6_DOWN_UDP.store(0, Ordering::SeqCst);
+        V6_DOWN_CAMPUS.store(0, Ordering::SeqCst);
         V4_UP.store(0, Ordering::SeqCst);
-        V6_DOWN.store(0, Ordering::SeqCst);
         V6_UP.store(0, Ordering::SeqCst);
         let stop = Arc::new(AtomicBool::new(false));
         let control = Arc::new(AtomicU64::new(0));
@@ -98,15 +112,24 @@ impl Watch {
         let ready = READY.load(Ordering::SeqCst);
         let gap = GAP.swap(false, Ordering::SeqCst);
         let flow = Flow {
-            v4_down: V4_DOWN.swap(0, Ordering::SeqCst),
+            v4_down_tcp: V4_DOWN_TCP.swap(0, Ordering::SeqCst),
+            v4_down_udp: V4_DOWN_UDP.swap(0, Ordering::SeqCst),
+            v4_down_campus: V4_DOWN_CAMPUS.swap(0, Ordering::SeqCst),
+            v6_down_tcp: V6_DOWN_TCP.swap(0, Ordering::SeqCst),
+            v6_down_udp: V6_DOWN_UDP.swap(0, Ordering::SeqCst),
+            v6_down_campus: V6_DOWN_CAMPUS.swap(0, Ordering::SeqCst),
             v4_up: V4_UP.swap(0, Ordering::SeqCst),
-            v6_down: V6_DOWN.swap(0, Ordering::SeqCst),
             v6_up: V6_UP.swap(0, Ordering::SeqCst),
         };
         if !ready || gap {
-            return Sample { totals: Totals::default(), ready, gap: ready && gap };
+            return Sample {
+                totals: Totals::default(),
+                breakdown: Flow::default(),
+                ready,
+                gap: ready && gap,
+            };
         }
-        Sample { totals: fold(flow, night), ready: true, gap: false }
+        Sample { totals: fold(flow, night), breakdown: flow, ready: true, gap: false }
     }
 }
 
@@ -128,28 +151,33 @@ impl Drop for Watch {
 
 pub fn classify(id: u16, data: &[u8]) -> Flow {
     match id {
-        SEND_V4 | SEND_TCP_V4 | RETX_TCP_V4 => v4_flow(data, true),
-        RECV_V4 | RECV_TCP_V4 => v4_flow(data, false),
-        SEND_V6 | SEND_TCP_V6 | RETX_TCP_V6 => v6_flow(data, true),
-        RECV_V6 | RECV_TCP_V6 => v6_flow(data, false),
+        SEND_TCP_V4 | RETX_TCP_V4 => v4_flow(data, true, true),
+        RECV_TCP_V4 => v4_flow(data, false, true),
+        SEND_V4 => v4_flow(data, true, false),
+        RECV_V4 => v4_flow(data, false, false),
+        SEND_TCP_V6 | RETX_TCP_V6 => v6_flow(data, true, true),
+        RECV_TCP_V6 => v6_flow(data, false, true),
+        SEND_V6 => v6_flow(data, true, false),
+        RECV_V6 => v6_flow(data, false, false),
         _ => Flow::default(),
     }
 }
 
 pub fn fold(flow: Flow, night: bool) -> Totals {
     let mut totals = Totals::default();
+    let v4_down = flow.v4_down_tcp + flow.v4_down_udp;
     if night {
-        totals.v4_night = flow.v4_down;
+        totals.v4_night = v4_down;
     } else {
-        totals.v4_day = flow.v4_down;
+        totals.v4_day = v4_down;
     }
     totals.v4_up = flow.v4_up;
-    totals.v6_down = flow.v6_down;
+    totals.v6_down = flow.v6_down_tcp + flow.v6_down_udp + flow.v6_down_campus;
     totals.v6_up = flow.v6_up;
     totals
 }
 
-fn v4_flow(data: &[u8], send: bool) -> Flow {
+fn v4_flow(data: &[u8], send: bool, tcp: bool) -> Flow {
     let Some(size) = datagram_size(data) else {
         return Flow::default();
     };
@@ -163,12 +191,18 @@ fn v4_flow(data: &[u8], send: bool) -> Flow {
     if send {
         flow.v4_up = size;
     } else if !ipv4_is_local(daddr) || !ipv4_is_local(saddr) {
-        flow.v4_down = size;
+        if tcp {
+            flow.v4_down_tcp = size;
+        } else {
+            flow.v4_down_udp = size;
+        }
+    } else {
+        flow.v4_down_campus = size;
     }
     flow
 }
 
-fn v6_flow(data: &[u8], send: bool) -> Flow {
+fn v6_flow(data: &[u8], send: bool, tcp: bool) -> Flow {
     let Some(size) = datagram_size(data) else {
         return Flow::default();
     };
@@ -182,8 +216,12 @@ fn v6_flow(data: &[u8], send: bool) -> Flow {
     let mut flow = Flow::default();
     if send {
         flow.v6_up = size;
+    } else if v6_is_campus(&saddr) {
+        flow.v6_down_campus = size;
+    } else if tcp {
+        flow.v6_down_tcp = size;
     } else {
-        flow.v6_down = size;
+        flow.v6_down_udp = size;
     }
     flow
 }
@@ -222,14 +260,26 @@ fn read_v6(data: &[u8]) -> Option<([u8; 16], [u8; 16])> {
 }
 
 fn add_flow(flow: Flow) {
-    if flow.v4_down > 0 {
-        V4_DOWN.fetch_add(flow.v4_down, Ordering::Relaxed);
+    if flow.v4_down_tcp > 0 {
+        V4_DOWN_TCP.fetch_add(flow.v4_down_tcp, Ordering::Relaxed);
+    }
+    if flow.v4_down_udp > 0 {
+        V4_DOWN_UDP.fetch_add(flow.v4_down_udp, Ordering::Relaxed);
+    }
+    if flow.v4_down_campus > 0 {
+        V4_DOWN_CAMPUS.fetch_add(flow.v4_down_campus, Ordering::Relaxed);
+    }
+    if flow.v6_down_tcp > 0 {
+        V6_DOWN_TCP.fetch_add(flow.v6_down_tcp, Ordering::Relaxed);
+    }
+    if flow.v6_down_udp > 0 {
+        V6_DOWN_UDP.fetch_add(flow.v6_down_udp, Ordering::Relaxed);
+    }
+    if flow.v6_down_campus > 0 {
+        V6_DOWN_CAMPUS.fetch_add(flow.v6_down_campus, Ordering::Relaxed);
     }
     if flow.v4_up > 0 {
         V4_UP.fetch_add(flow.v4_up, Ordering::Relaxed);
-    }
-    if flow.v6_down > 0 {
-        V6_DOWN.fetch_add(flow.v6_down, Ordering::Relaxed);
     }
     if flow.v6_up > 0 {
         V6_UP.fetch_add(flow.v6_up, Ordering::Relaxed);
@@ -410,6 +460,8 @@ mod tests {
     fn off_campus_download_follows_either_address() {
         let direct = v4(false, 1500, [172, 22, 1, 8], [8, 8, 8, 8]);
         let swapped = v4(false, 1500, [8, 8, 8, 8], [172, 22, 1, 8]);
+        assert_eq!(classify(43, &direct).v4_down_udp, 1500);
+        assert_eq!(classify(43, &swapped).v4_down_udp, 1500);
         let day = fold(classify(43, &direct), false);
         let night = fold(classify(43, &swapped), true);
         assert_eq!(day.v4_day, 1500);
@@ -420,7 +472,10 @@ mod tests {
     #[test]
     fn campus_only_download_is_ignored_and_upload_is_kept() {
         let local = v4(false, 400, [172, 22, 0, 2], [10, 0, 0, 1]);
-        assert!(fold(classify(43, &local), false).v4_day == 0);
+        let campus = classify(43, &local);
+        assert_eq!(campus.v4_down_campus, 400);
+        assert_eq!(campus.v4_down_udp, 0);
+        assert_eq!(fold(campus, false).v4_day, 0);
         let sent = v4(true, 80, [1, 2, 3, 4], [172, 22, 8, 8]);
         let up = fold(classify(42, &sent), false);
         assert_eq!(up.v4_up, 80);
@@ -454,6 +509,23 @@ mod tests {
         prefixed[10] = 0x20;
         prefixed[11] = 0x01;
         assert_eq!(fold(classify(59, &prefixed), false).v6_down, 700);
+    }
+
+    #[test]
+    fn campus_ipv6_download_is_split_from_external() {
+        let mut campus = [0u8; 16];
+        campus[0] = 0x20;
+        campus[1] = 0x01;
+        campus[2] = 0x0d;
+        campus[3] = 0xa8;
+        campus[4] = 0x90;
+        let flow = classify(59, &v6_event(600, mapped([172, 22, 1, 8]), campus));
+        assert_eq!(flow.v6_down_campus, 600);
+        assert_eq!(flow.v6_down_udp, 0);
+        assert_eq!(fold(flow, false).v6_down, 600);
+        let external = classify(59, &v6_event(600, mapped([172, 22, 1, 8]), [0x20, 0x01, 0x02, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
+        assert_eq!(external.v6_down_udp, 600);
+        assert_eq!(external.v6_down_campus, 0);
     }
 
     #[test]

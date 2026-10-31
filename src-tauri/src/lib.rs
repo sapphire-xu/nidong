@@ -15,6 +15,7 @@ mod desk_drop;
 mod meter_cmd;
 mod public_ip;
 mod share;
+mod smart_mute;
 mod wlan;
 
 use client::{
@@ -286,6 +287,7 @@ fn emit_snapshot(app: &AppHandle, snap: &Snapshot) {
     let _ = app.emit("snapshot-updated", snap);
 }
 
+#[cfg(test)]
 fn version_parts(v: &str) -> Vec<u64> {
     v.split(|c: char| c != '.' && !c.is_ascii_digit())
         .next()
@@ -323,6 +325,7 @@ fn other_copy_should_exit(current: &std::path::Path, other: &str) -> bool {
     !same_dir(current_dir, other_dir)
 }
 
+#[cfg(test)]
 fn version_gt(left: &str, right: &str) -> bool {
     let left = version_parts(left);
     let right = version_parts(right);
@@ -775,6 +778,7 @@ fn save_settings(app: AppHandle, state: State<AppState>, mut settings: AppSettin
             }
         }
         settings.remind_volume = settings.remind_volume.min(100);
+        settings.smart_mute_idle_minutes = settings.smart_mute_idle_minutes.clamp(20, 200);
         crate::hotkey::update(&settings);
         apply_autostart(settings.autostart)?;
         *g = settings.clone();
@@ -1782,7 +1786,7 @@ pub fn run() {
     builder = builder.plugin(tauri_plugin_dialog::init());
     builder = builder.plugin(tauri_plugin_process::init());
     builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
-    builder
+    let app = builder
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -1828,6 +1832,7 @@ pub fn run() {
                 course_attempt_day: Mutex::new(None),
                 data_dir: data_dir.clone(),
             });
+            app.manage(smart_mute::start(app.handle().clone()));
 
             if let Some(win) = app.get_webview_window("main") {
                 place_window(&win, &settings);
@@ -2034,8 +2039,15 @@ pub fn run() {
             meter_cmd::meter_disable,
             meter_cmd::meter_open_log
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("泥洞启动失败");
+    app.run(|handle, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            if let Some(mute) = handle.try_state::<smart_mute::SmartMute>() {
+                mute.shutdown();
+            }
+        }
+    });
 }
 
 #[cfg(test)]
