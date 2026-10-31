@@ -1,11 +1,11 @@
 {
-  "version": "2.4.1",
-  "notes": "更新一下流量速度显示",
-  "pub_date": "2026-10-25T15:07:19Z",
+  "version": "2.4.2",
+  "notes": "新增工具箱防社死设置（智能静音），网费页显示上下行与 TCP/UDP 明细。",
+  "pub_date": "2026-10-31T08:43:07Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDliaHlqcTFzZEVGY1VlN2tScDUyUm8yNTVUd3NsaXJLQ0o5US9Oc00zU1VyNUVyZjlmRkJHUmZnMXNBZHBUQmF5Y3JGOW85UkJxck1EVmE1TnZKWmdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyOTQwODM5CWZpbGU65rOl5rSeXzIuNC4xX3g2NC1zZXR1cC5leGUKamk5QVgrYlZzN0dXeGFlUXgrN21ZKzQvYjJwSk1mUlVRUFBHUTBURlZ2Ry9TZ0w3K3FNTk8xOTE0VDVsM2RKSW8waWFlQ29rVldGTG1uRFB1VkN0QVE9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.4.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZC9FZkZudTFFUTROTjZqTVVWUG5MYnJsU0tVdVlYVzZiMnFxb3E5YVk1MTlQNUI0VVE2NGdaRUNKVkp0emtQblk5UmZvVnJYTGgwdkVWY0pFUXFiU2cwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNDM2MTg3CWZpbGU65rOl5rSeXzIuNC4yX3g2NC1zZXR1cC5leGUKalVpVitlVXlaNExrenRrRmJoMnA3ak1EdTJTWlErdGdjRDNhcHlnWWl4TXpjZ3lYczJ4TG9KNjBwU3R6d0N6eU1ldXlacTRodmJXK2cyVXJEcVdORGc9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.4.2_x64-setup.exe"
     }
   }
 }
