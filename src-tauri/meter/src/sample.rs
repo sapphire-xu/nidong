@@ -3,7 +3,8 @@
 
 use std::collections::HashMap;
 
-use crate::place::v6_is_campus;
+use crate::netif;
+use crate::place::{v4_is_campus_public, v6_is_campus};
 use crate::store::Totals;
 use crate::udp::Flow;
 
@@ -171,13 +172,20 @@ impl Sampler {
     pub fn poll(&mut self, night: bool) -> Tick {
         let mut tick = Tick::default();
         let mut still = HashMap::new();
-        self.collect4(&mut tick, &mut still, night);
-        self.collect6(&mut tick, &mut still);
+        let virtuals = netif::snapshot();
+        self.collect4(&mut tick, &mut still, night, &virtuals);
+        self.collect6(&mut tick, &mut still, &virtuals);
         self.seen = still;
         tick
     }
 
-    fn collect4(&mut self, tick: &mut Tick, still: &mut HashMap<Key, Base>, night: bool) {
+    fn collect4(
+        &mut self,
+        tick: &mut Tick,
+        still: &mut HashMap<Key, Base>,
+        night: bool,
+        virtuals: &netif::VirtualAddrs,
+    ) {
         let Some(buf) = table(AF_INET) else {
             return;
         };
@@ -193,6 +201,11 @@ impl Sampler {
             }
             let row: TcpRowOwnerPid = unsafe { std::ptr::read_unaligned(buf[start..].as_ptr() as *const _) };
             if row.state == MIB_TCP_STATE_LISTEN {
+                continue;
+            }
+            if virtuals.is_v4(&row.local_addr.to_ne_bytes())
+                || virtuals.is_v4(&row.remote_addr.to_ne_bytes())
+            {
                 continue;
             }
             tick.tcp += 1;
@@ -220,7 +233,7 @@ impl Sampler {
             };
             let (din, dout) = delta_of(&self.seen, still, key, inn, out);
             let octets = row.remote_addr.to_ne_bytes();
-            if !ipv4_is_local(octets) {
+            if v4_billed(octets) {
                 if night {
                     tick.totals.v4_night += din;
                 } else {
@@ -235,7 +248,12 @@ impl Sampler {
         }
     }
 
-    fn collect6(&mut self, tick: &mut Tick, still: &mut HashMap<Key, Base>) {
+    fn collect6(
+        &mut self,
+        tick: &mut Tick,
+        still: &mut HashMap<Key, Base>,
+        virtuals: &netif::VirtualAddrs,
+    ) {
         let Some(buf) = table(AF_INET6) else {
             return;
         };
@@ -251,6 +269,9 @@ impl Sampler {
             }
             let row: Tcp6RowOwnerPid = unsafe { std::ptr::read_unaligned(buf[start..].as_ptr() as *const _) };
             if row.state == MIB_TCP_STATE_LISTEN {
+                continue;
+            }
+            if virtuals.is_v6(&row.local) || virtuals.is_v6(&row.remote) {
                 continue;
             }
             if !v6_is_global(&row.remote) {
@@ -301,6 +322,10 @@ pub fn ipv4_is_local(o: [u8; 4]) -> bool {
         || (a == 172 && (16..32).contains(&b))
         || (a == 192 && b == 168)
         || a >= 224
+}
+
+pub(crate) fn v4_billed(o: [u8; 4]) -> bool {
+    !ipv4_is_local(o) && !v4_is_campus_public(&o)
 }
 
 pub(crate) fn v6_is_global(addr: &[u8; 16]) -> bool {
@@ -452,5 +477,14 @@ mod tests {
         assert!(ipv4_is_local([192, 168, 1, 1]));
         assert!(!ipv4_is_local([210, 30, 192, 148]));
         assert!(!ipv4_is_local([1, 1, 1, 1]));
+    }
+
+    #[test]
+    fn campus_public_ranges_are_not_billed() {
+        assert!(!v4_billed([202, 118, 1, 66]));
+        assert!(!v4_billed([210, 30, 206, 55]));
+        assert!(v4_billed([202, 118, 64, 1]));
+        assert!(v4_billed([210, 30, 208, 1]));
+        assert!(v4_billed([1, 1, 1, 1]));
     }
 }

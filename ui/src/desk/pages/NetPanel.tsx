@@ -356,7 +356,7 @@ export function NetPanel(props: { portalBytes?: number; portalKnown: boolean }) 
           <div className="net-sheet">
             <MeterTable today={status.today} month={status.month} />
           </div>
-          <p className="src">表格数据为本机记录流量，可能会与校园网记录有所偏差。</p>
+          <p className="src">表格为本机记录。校内公网段和 WARP、Clash 隧道内层不计入；与校园网记录仍可能有偏差。</p>
           <hr className="net-split" />
           <div className="share-actions net-toolbar">
             <div className="net-toolbar-start">

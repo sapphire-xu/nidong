@@ -17,7 +17,8 @@ use windows::Win32::System::Diagnostics::Etw::{
     WNODE_FLAG_TRACED_GUID,
 };
 
-use crate::place::v6_is_campus;
+use crate::netif::{self, VirtualAddrs};
+use crate::place::{v4_is_campus_public, v6_is_campus};
 use crate::sample::{ipv4_is_local, v6_is_global};
 use crate::store::Totals;
 
@@ -150,15 +151,19 @@ impl Drop for Watch {
 }
 
 pub fn classify(id: u16, data: &[u8]) -> Flow {
+    netif::with(|virtuals| classify_with(id, data, virtuals))
+}
+
+fn classify_with(id: u16, data: &[u8], virtuals: &VirtualAddrs) -> Flow {
     match id {
-        SEND_TCP_V4 | RETX_TCP_V4 => v4_flow(data, true, true),
-        RECV_TCP_V4 => v4_flow(data, false, true),
-        SEND_V4 => v4_flow(data, true, false),
-        RECV_V4 => v4_flow(data, false, false),
-        SEND_TCP_V6 | RETX_TCP_V6 => v6_flow(data, true, true),
-        RECV_TCP_V6 => v6_flow(data, false, true),
-        SEND_V6 => v6_flow(data, true, false),
-        RECV_V6 => v6_flow(data, false, false),
+        SEND_TCP_V4 | RETX_TCP_V4 => v4_flow(data, true, true, virtuals),
+        RECV_TCP_V4 => v4_flow(data, false, true, virtuals),
+        SEND_V4 => v4_flow(data, true, false, virtuals),
+        RECV_V4 => v4_flow(data, false, false, virtuals),
+        SEND_TCP_V6 | RETX_TCP_V6 => v6_flow(data, true, true, virtuals),
+        RECV_TCP_V6 => v6_flow(data, false, true, virtuals),
+        SEND_V6 => v6_flow(data, true, false, virtuals),
+        RECV_V6 => v6_flow(data, false, false, virtuals),
         _ => Flow::default(),
     }
 }
@@ -177,7 +182,7 @@ pub fn fold(flow: Flow, night: bool) -> Totals {
     totals
 }
 
-fn v4_flow(data: &[u8], send: bool, tcp: bool) -> Flow {
+fn v4_flow(data: &[u8], send: bool, tcp: bool, virtuals: &VirtualAddrs) -> Flow {
     let Some(size) = datagram_size(data) else {
         return Flow::default();
     };
@@ -187,10 +192,13 @@ fn v4_flow(data: &[u8], send: bool, tcp: bool) -> Flow {
     let Some(saddr) = read_v4(data, 12) else {
         return Flow::default();
     };
+    if virtuals.is_v4(&daddr) || virtuals.is_v4(&saddr) {
+        return Flow::default();
+    }
     let mut flow = Flow::default();
     if send {
         flow.v4_up = size;
-    } else if !ipv4_is_local(daddr) || !ipv4_is_local(saddr) {
+    } else if !v4_is_free(daddr) || !v4_is_free(saddr) {
         if tcp {
             flow.v4_down_tcp = size;
         } else {
@@ -202,13 +210,20 @@ fn v4_flow(data: &[u8], send: bool, tcp: bool) -> Flow {
     flow
 }
 
-fn v6_flow(data: &[u8], send: bool, tcp: bool) -> Flow {
+fn v4_is_free(o: [u8; 4]) -> bool {
+    ipv4_is_local(o) || v4_is_campus_public(&o)
+}
+
+fn v6_flow(data: &[u8], send: bool, tcp: bool, virtuals: &VirtualAddrs) -> Flow {
     let Some(size) = datagram_size(data) else {
         return Flow::default();
     };
     let Some((daddr, saddr)) = read_v6(data) else {
         return Flow::default();
     };
+    if virtuals.is_v6(&daddr) || virtuals.is_v6(&saddr) {
+        return Flow::default();
+    }
     // ::ffff:a.b.c.d 是双栈套接字上的 IPv4。同一份数据报还会有 UDPv4 事件，这里再记就会两边各算一次。
     if !v6_counts(&daddr) && !v6_counts(&saddr) {
         return Flow::default();
@@ -445,7 +460,8 @@ unsafe extern "system" fn on_buffer(logfile: *mut EVENT_TRACE_LOGFILEW) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify, fold};
+    use super::{classify, classify_with, fold};
+    use crate::netif::VirtualAddrs;
 
     fn v4(send: bool, size: u32, daddr: [u8; 4], saddr: [u8; 4]) -> Vec<u8> {
         let mut data = vec![0u8; 28];
@@ -526,6 +542,44 @@ mod tests {
         let external = classify(59, &v6_event(600, mapped([172, 22, 1, 8]), [0x20, 0x01, 0x02, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
         assert_eq!(external.v6_down_udp, 600);
         assert_eq!(external.v6_down_campus, 0);
+    }
+
+    #[test]
+    fn campus_public_ranges_are_not_billed() {
+        let neu = classify(43, &v4(false, 1500, [172, 22, 1, 8], [202, 118, 1, 66]));
+        assert_eq!(neu.v4_down_campus, 1500);
+        assert_eq!(neu.v4_down_udp, 0);
+        assert_eq!(fold(neu, false).v4_day, 0);
+        let shenyang = classify(11, &v4(false, 900, [210, 30, 206, 55], [172, 22, 1, 8]));
+        assert_eq!(shenyang.v4_down_campus, 900);
+        assert_eq!(shenyang.v4_down_tcp, 0);
+        let outside = classify(43, &v4(false, 700, [172, 22, 1, 8], [202, 118, 64, 1]));
+        assert_eq!(outside.v4_down_udp, 700);
+        assert_eq!(outside.v4_down_campus, 0);
+    }
+
+    #[test]
+    fn tunnel_inner_traffic_is_left_to_the_outer_connection() {
+        let virtuals = VirtualAddrs::from_parts(vec![[198, 18, 0, 1]], vec![]);
+        let inner = v4(false, 5000, [198, 18, 0, 1], [1, 1, 1, 1]);
+        assert_eq!(classify_with(43, &inner, &virtuals), super::Flow::default());
+        let outer = v4(false, 5000, [172, 22, 1, 8], [1, 1, 1, 1]);
+        assert_eq!(classify_with(43, &outer, &virtuals).v4_down_udp, 5000);
+        let mut v6_tunnel = [0u8; 16];
+        v6_tunnel[0] = 0xfd;
+        let virtuals6 = VirtualAddrs::from_parts(vec![], vec![v6_tunnel]);
+        let mut remote = [0u8; 16];
+        remote[0] = 0x20;
+        remote[1] = 0x01;
+        assert_eq!(
+            classify_with(59, &v6_event(800, v6_tunnel, remote), &virtuals6),
+            super::Flow::default()
+        );
+        let mut physical = [0u8; 16];
+        physical[0] = 0x20;
+        physical[1] = 0x01;
+        physical[15] = 0x02;
+        assert_eq!(classify_with(59, &v6_event(800, physical, remote), &virtuals6).v6_down_udp, 800);
     }
 
     #[test]

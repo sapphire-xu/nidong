@@ -1,5 +1,6 @@
 //! 泥洞本机流量记录。界面在泥洞里，计数在这个提权进程里。
 
+mod netif;
 mod place;
 mod run;
 mod sample;

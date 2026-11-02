@@ -40,13 +40,39 @@ fn is_campus_ssid(name: &str, configured: &str) -> bool {
 
 fn is_campus_addr(addr: &IpAddr) -> bool {
     match addr {
-        IpAddr::V4(v) => v4_is_campus(&v.octets()),
+        IpAddr::V4(v) => v4_is_campus(&v.octets()) || v4_is_campus_public(&v.octets()),
         IpAddr::V6(v) => v6_is_campus(&v.octets()),
     }
 }
 
 pub(crate) fn v4_is_campus(o: &[u8; 4]) -> bool {
     o[0] == 172 && o[1] == 22
+}
+
+/// 学校按校内处理的公网段。ip.neu.edu.cn 实测边界：
+/// 202.118.31.255 属于、202.118.32.1 不属于；210.30.207.255 属于、210.30.208.1 不属于。
+const CAMPUS_V4_NETS: &[([u8; 4], u8)] = &[([202, 118, 0, 0], 19), ([210, 30, 192, 0], 20)];
+
+pub(crate) fn v4_is_campus_public(o: &[u8; 4]) -> bool {
+    CAMPUS_V4_NETS
+        .iter()
+        .any(|(net, bits)| v4_in_prefix(net, o, *bits))
+}
+
+fn v4_in_prefix(net: &[u8; 4], addr: &[u8; 4], bits: u8) -> bool {
+    let mut left = bits as usize;
+    for i in 0..4 {
+        if left == 0 {
+            return true;
+        }
+        let take = left.min(8);
+        let mask = 0xffu8 << (8 - take);
+        if (net[i] ^ addr[i]) & mask != 0 {
+            return false;
+        }
+        left -= take;
+    }
+    true
 }
 
 pub(crate) fn v6_is_campus(o: &[u8; 16]) -> bool {
@@ -170,6 +196,19 @@ mod tests {
         assert!(!on_campus_net("NEUQ", "", &[outside]));
         assert!(!on_campus_net("CMCC", "", &[outside]));
         assert!(!on_campus_net("", "", &[outside]));
+    }
+
+    #[test]
+    fn neu_public_ranges_match_the_school_boundaries() {
+        assert!(v4_is_campus_public(&[202, 118, 0, 1]));
+        assert!(v4_is_campus_public(&[202, 118, 31, 255]));
+        assert!(!v4_is_campus_public(&[202, 118, 32, 1]));
+        assert!(v4_is_campus_public(&[210, 30, 192, 1]));
+        assert!(v4_is_campus_public(&[210, 30, 207, 255]));
+        assert!(!v4_is_campus_public(&[210, 30, 208, 1]));
+        assert!(!v4_is_campus_public(&[8, 8, 8, 8]));
+        let public = IpAddr::V4(Ipv4Addr::new(210, 30, 206, 55));
+        assert!(on_campus_net("", "", &[public]));
     }
 
     #[test]

@@ -111,6 +111,7 @@ fn loop_sample() {
         ledger.month = month;
     }
     let mut sampler = Sampler::new();
+    crate::netif::refresh();
     let udp_watch = crate::udp::Watch::start();
     let _ = udp_watch.take(false);
     let mut last_save = Instant::now();
@@ -119,6 +120,7 @@ fn loop_sample() {
         if stop_requested() {
             break;
         }
+        crate::netif::refresh();
         let (month, day, night) = store::now_parts();
         ledger = store::archive_if_needed(&path, ledger, &month);
         let (on_campus, ipv4, ipv6) = crate::place::currently_on_campus();

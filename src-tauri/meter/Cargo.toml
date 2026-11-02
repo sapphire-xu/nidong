@@ -16,6 +16,9 @@ serde_json = "1"
 windows = { version = "0.61", features = [
     "Networking_Connectivity",
     "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
     "Win32_System_Diagnostics_Etw",
     "Win32_System_Time",
     "Win32_System_WinRT",

@@ -165,6 +165,8 @@ export function Home(props: {
   const preview = homeSpend.length ? homeSpend : snap?.cardSpend || [];
   const previewMax = Math.max(...preview.map((d) => d.spend), 1);
   const today = ymd(now);
+  const previewDays = preview.filter((d) => d.date <= today).slice(-31);
+  const previewPad = Math.max(0, 8 - previewDays.length);
 
   return (
     <div className="stack">
@@ -211,10 +213,11 @@ export function Home(props: {
             <div className="card-v num">{snap?.card ? fmtMoney(snap.card.balance) : "—"}</div>
             <div className={`card-u ${cardWarn ? "warn" : ""}`}>元{snap?.errors.card ? " · 同步失败" : ""}</div>
             <div className="mini">
-              {preview.filter((d) => d.date <= today).slice(-31).map((d) => {
+              {previewDays.map((d) => {
                 const h = d.spend ? Math.max(3, Math.round((d.spend / previewMax) * 16)) : 0;
                 return <i key={d.date} className={d.date === today ? "today" : ""} style={{ height: h }} />;
               })}
+              {Array.from({ length: previewPad }, (_, i) => <i key={`pad-${i}`} aria-hidden="true" />)}
             </div>
               </>
             ) : (
