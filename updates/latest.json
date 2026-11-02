@@ -1,11 +1,11 @@
 {
-  "version": "2.4.2",
-  "notes": "新增工具箱防社死设置（智能静音），网费页显示上下行与 TCP/UDP 明细。",
-  "pub_date": "2026-10-31T08:43:07Z",
+  "version": "2.4.3",
+  "notes": "流量记录把东大校内公网段（202.118.0.0/19、210.30.192.0/20）算作校内，WARP、Clash 只记物理网卡外层，计费更接近校园网；主页校园卡柱状图月初固定 8 格。",
+  "pub_date": "2026-11-02T14:07:08Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZC9FZkZudTFFUTROTjZqTVVWUG5MYnJsU0tVdVlYVzZiMnFxb3E5YVk1MTlQNUI0VVE2NGdaRUNKVkp0emtQblk5UmZvVnJYTGgwdkVWY0pFUXFiU2cwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNDM2MTg3CWZpbGU65rOl5rSeXzIuNC4yX3g2NC1zZXR1cC5leGUKalVpVitlVXlaNExrenRrRmJoMnA3ak1EdTJTWlErdGdjRDNhcHlnWWl4TXpjZ3lYczJ4TG9KNjBwU3R6d0N6eU1ldXlacTRodmJXK2cyVXJEcVdORGc9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.4.2_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDM5clVySGFNOFRtL2VmL0RoQmtmaVV3aWV1R01ZTDFkWUI5VVRsVEdIcjZ6d01qM0M4OXZCTlN5aDlWdDZoUFQ2d1AxbFBnYUpRWjNqUmdkOWVCdGc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjI4NDI4CWZpbGU65rOl5rSeXzIuNC4zX3g2NC1zZXR1cC5leGUKQ09mMkRLTy83V1pBVFdrSXF2bkpvZWNUaFRraVIvbEt5bEZwNUdHY20rcTZnSnJhTEtXZjRxQU9DVDlmZENDcmFaZ3FOVEFWa0VqazRGOFNDWXJBRGc9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.4.3_x64-setup.exe"
     }
   }
 }
