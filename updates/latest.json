@@ -1,6 +1,6 @@
 {
   "version": "2.4.4",
-  "notes": "流量记录不再把 Clash Verge 的 Meta 隧道和 198.18.0.0/15 的 fake-ip 算进校外 IPv4。",
+  "notes": "流量记录不再把虚拟网卡内层的连接算进校外 IPv4。",
   "pub_date": "2026-11-06T15:22:29Z",
   "platforms": {
     "windows-x86_64": {
