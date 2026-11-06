@@ -1,5 +1,6 @@
 //! WARP、Clash 之类虚拟网卡的本地地址。
 //! 这些网卡上的连接是隧道内层，外层已经按物理网卡记过一次；学校网关也只看得到外层。
+//! fake-ip 默认段不依赖网卡名：Clash Verge 的设备名是 Meta，描述是 Meta Tunnel。
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::{OnceLock, RwLock};
@@ -19,6 +20,8 @@ const VIRTUAL_NAMES: &[&str] = &[
     "wintun",
     "wireguard",
     "sing-box",
+    // Clash Verge / mihomo 默认设备名。整词匹配，避免 MediaTek。
+    "meta",
 ];
 
 #[derive(Clone, Debug, Default)]
@@ -29,11 +32,11 @@ pub struct VirtualAddrs {
 
 impl VirtualAddrs {
     pub fn is_v4(&self, addr: &[u8; 4]) -> bool {
-        self.v4.iter().any(|a| a == addr)
+        is_fake_ip_v4(addr) || self.v4.iter().any(|a| a == addr)
     }
 
     pub fn is_v6(&self, addr: &[u8; 16]) -> bool {
-        self.v6.iter().any(|a| a == addr)
+        is_mihomo_tun_v6(addr) || self.v6.iter().any(|a| a == addr)
     }
 
     #[cfg(test)]
@@ -165,7 +168,34 @@ fn parse_sockaddr(addr: &SOCKET_ADDRESS) -> Option<IpAddr> {
 
 fn is_virtual_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    VIRTUAL_NAMES.iter().any(|key| lower.contains(key))
+    VIRTUAL_NAMES.iter().any(|key| contains_key(&lower, key))
+}
+
+fn contains_key(lower: &str, key: &str) -> bool {
+    if key == "meta" {
+        return contains_word(lower, key);
+    }
+    lower.contains(key)
+}
+
+fn contains_word(hay: &str, word: &str) -> bool {
+    hay.match_indices(word).any(|(i, _)| {
+        let bytes = hay.as_bytes();
+        let before_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
+        let end = i + word.len();
+        let after_ok = end == hay.len() || !bytes[end].is_ascii_alphanumeric();
+        before_ok && after_ok
+    })
+}
+
+/// 198.18.0.0/15。RFC 2544 保留段，Clash、mihomo、sing-box 的 fake-ip 默认在这里。
+fn is_fake_ip_v4(addr: &[u8; 4]) -> bool {
+    addr[0] == 198 && matches!(addr[1], 18 | 19)
+}
+
+/// mihomo 默认 TUN：fdfe:dcba:9876::/64。
+fn is_mihomo_tun_v6(addr: &[u8; 16]) -> bool {
+    addr[..8] == [0xfd, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x00, 0x00]
 }
 
 #[cfg(test)]
@@ -181,6 +211,9 @@ mod tests {
             "Mihomo",
             "Wintun Userspace Tunnel",
             "WireGuard Tunnel",
+            "Meta",
+            "META",
+            "Meta Tunnel",
         ] {
             assert!(is_virtual_name(name), "{name}");
         }
@@ -189,9 +222,35 @@ mod tests {
             "Realtek Gaming 2.5GbE Family Controller",
             "以太网",
             "",
+            "metadata",
         ] {
             assert!(!is_virtual_name(name), "{name}");
         }
+    }
+
+    #[test]
+    fn fake_ip_ranges_count_without_an_adapter_name() {
+        let addrs = VirtualAddrs::default();
+        assert!(addrs.is_v4(&[198, 18, 0, 1]));
+        assert!(addrs.is_v4(&[198, 18, 0, 23]));
+        assert!(addrs.is_v4(&[198, 19, 255, 255]));
+        assert!(!addrs.is_v4(&[198, 17, 255, 255]));
+        assert!(!addrs.is_v4(&[198, 20, 0, 1]));
+        assert!(!addrs.is_v4(&[1, 1, 1, 1]));
+        let mut tun = [0u8; 16];
+        tun[0] = 0xfd;
+        tun[1] = 0xfe;
+        tun[2] = 0xdc;
+        tun[3] = 0xba;
+        tun[4] = 0x98;
+        tun[5] = 0x76;
+        tun[15] = 1;
+        assert!(addrs.is_v6(&tun));
+        tun[7] = 1;
+        assert!(!addrs.is_v6(&tun), "fdfe:dcba:9876:1::1 is outside /64");
+        tun[7] = 0;
+        tun[5] = 0x77;
+        assert!(!addrs.is_v6(&tun));
     }
 
     #[test]

@@ -583,6 +583,33 @@ mod tests {
     }
 
     #[test]
+    fn clash_verge_fake_ip_is_not_billed_when_the_adapter_name_is_unknown() {
+        let empty = VirtualAddrs::default();
+        let inner = v4(false, 5000, [198, 18, 0, 23], [198, 18, 0, 1]);
+        assert_eq!(classify_with(11, &inner, &empty), super::Flow::default());
+        assert_eq!(fold(classify_with(11, &inner, &empty), false).v4_day, 0);
+        let up = v4(true, 200, [198, 18, 0, 23], [198, 18, 0, 1]);
+        assert_eq!(classify_with(10, &up, &empty), super::Flow::default());
+        let edge = v4(false, 900, [198, 19, 255, 1], [172, 22, 1, 8]);
+        assert_eq!(classify_with(43, &edge, &empty), super::Flow::default());
+        let outer = v4(false, 5000, [172, 22, 1, 8], [1, 1, 1, 1]);
+        assert_eq!(classify_with(43, &outer, &empty).v4_down_udp, 5000);
+        let mut tun = [0u8; 16];
+        tun[0] = 0xfd;
+        tun[1] = 0xfe;
+        tun[2] = 0xdc;
+        tun[3] = 0xba;
+        tun[4] = 0x98;
+        tun[5] = 0x76;
+        tun[15] = 1;
+        let mut remote = [0u8; 16];
+        remote[0] = 0x20;
+        remote[1] = 0x01;
+        assert_eq!(classify_with(27, &v6_event(800, tun, remote), &empty), super::Flow::default());
+        assert_eq!(classify_with(59, &v6_event(800, remote, remote), &empty).v6_down_udp, 800);
+    }
+
+    #[test]
     fn ipv4_mapped_event_stays_out_of_ipv6() {
         let data = v6_event(1200, mapped([8, 8, 8, 8]), mapped([172, 22, 1, 8]));
         assert_eq!(classify(59, &data), super::Flow::default());
