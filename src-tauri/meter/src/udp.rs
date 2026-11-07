@@ -231,7 +231,8 @@ fn v6_flow(data: &[u8], send: bool, tcp: bool, virtuals: &VirtualAddrs) -> Flow 
     let mut flow = Flow::default();
     if send {
         flow.v6_up = size;
-    } else if v6_is_campus(&saddr) {
+    } else if v6_is_campus(&daddr) && v6_is_campus(&saddr) {
+        // 人在校园网时，本机地址也在 2001:da8:9000::/48。只看一端会把公网下载都算成校内。
         flow.v6_down_campus = size;
     } else if tcp {
         flow.v6_down_tcp = size;
@@ -535,10 +536,24 @@ mod tests {
         campus[2] = 0x0d;
         campus[3] = 0xa8;
         campus[4] = 0x90;
-        let flow = classify(59, &v6_event(600, mapped([172, 22, 1, 8]), campus));
+        let mut local = campus;
+        local[15] = 1;
+        let mut peer = campus;
+        peer[15] = 9;
+        let flow = classify(59, &v6_event(600, peer, local));
         assert_eq!(flow.v6_down_campus, 600);
         assert_eq!(flow.v6_down_udp, 0);
         assert_eq!(fold(flow, false).v6_down, 600);
+        assert_eq!(classify(27, &v6_event(600, local, peer)).v6_down_campus, 600);
+        let mut steam = [0u8; 16];
+        steam[0] = 0x24;
+        steam[1] = 0x0e;
+        let down = classify(59, &v6_event(1600, steam, local));
+        assert_eq!(down.v6_down_udp, 1600);
+        assert_eq!(down.v6_down_campus, 0);
+        let other_way = classify(27, &v6_event(1600, local, steam));
+        assert_eq!(other_way.v6_down_tcp, 1600);
+        assert_eq!(other_way.v6_down_campus, 0);
         let external = classify(59, &v6_event(600, mapped([172, 22, 1, 8]), [0x20, 0x01, 0x02, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
         assert_eq!(external.v6_down_udp, 600);
         assert_eq!(external.v6_down_campus, 0);
