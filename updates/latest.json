@@ -1,11 +1,11 @@
 {
-  "version": "2.4.4",
-  "notes": "流量记录不再把虚拟网卡内层的连接算进校外 IPv4。",
-  "pub_date": "2026-11-06T15:22:29Z",
+  "version": "2.4.5",
+  "notes": "直连校园网时，流量记录只把对端也在校园网里的 IPv6 算作校内，公网下载改记到校外 IPv6。",
+  "pub_date": "2026-11-07T16:32:33Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDJoTEJYcGpGVWdsSmR0ZDh3YTRuL2lyWCtxUmJsMTdoQUFIRUE4WlJQRTV3WkZIeE9NRUFFSnpzM0diREFYdEtraW1OSWpGQllQeHErcjl4b2tHQXdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzOTc4NTQ5CWZpbGU65rOl5rSeXzIuNC40X3g2NC1zZXR1cC5leGUKM0NtNEVBdFYxVmNHU3BqbWJrRGpTYk5QRjROTnhOL3hYbEZwTnNpZ2pGaUk3ZkFjTVhPOVN4N2krU20xMjZyQWVVbldITlY5MWl1S010U3kreWFrQ3c9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.4.4_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZCtoUjdTM2ZuazBzbXQxejZiMXBvTzdxWGdRemprZHJmVDRxaVcrc2x1cGFUZGtXWHpnR0pTek56UHJ2WWQ1dnNGbHQ0VnJxVUgwdlZNQ2txUVhnT1F3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MDY5MTUzCWZpbGU65rOl5rSeXzIuNC41X3g2NC1zZXR1cC5leGUKcHVkNlVsRWZLNlF2U0tiUlRFMEZiZXQxeG5SZW5HRDZuYkVPVW90cDNrMUVMaGNEN0x3dkkxSXNPVnNVWCtLNGZPU0ZTZXErQVJYbDAzYVNXM1BEQmc9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.4.5_x64-setup.exe"
     }
   }
 }
