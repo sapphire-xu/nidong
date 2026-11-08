@@ -1,11 +1,11 @@
 {
-  "version": "2.4.5",
-  "notes": "直连校园网时，流量记录只把对端也在校园网里的 IPv6 算作校内，公网下载改记到校外 IPv6。",
-  "pub_date": "2026-11-07T16:32:33Z",
+  "version": "2.5.0",
+  "notes": "工具箱新增定时下载，可以约到下一个 0 点再下链接，下完可以选择关机。",
+  "pub_date": "2026-11-08T12:17:56Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZCtoUjdTM2ZuazBzbXQxejZiMXBvTzdxWGdRemprZHJmVDRxaVcrc2x1cGFUZGtXWHpnR0pTek56UHJ2WWQ1dnNGbHQ0VnJxVUgwdlZNQ2txUVhnT1F3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MDY5MTUzCWZpbGU65rOl5rSeXzIuNC41X3g2NC1zZXR1cC5leGUKcHVkNlVsRWZLNlF2U0tiUlRFMEZiZXQxeG5SZW5HRDZuYkVPVW90cDNrMUVMaGNEN0x3dkkxSXNPVnNVWCtLNGZPU0ZTZXErQVJYbDAzYVNXM1BEQmc9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.4.5_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDc1b2grNkJJWTVMeno0aWxJQTI1WVN1a1FlUFoyME9qUFc0MUd6YmtSblFjMHpRQ1RFdVRBYW1mK2pBd00wbE9HTjBlc3B6KzVxRndrVXNwc3RHemdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MTQwMjc2CWZpbGU65rOl5rSeXzIuNS4wX3g2NC1zZXR1cC5leGUKN0U3SG9XL2d0TVdiZG9uL2t6MmhoMnFYVWh2NnNYMnVzT1BvRzB4WEx6SUNvcU1laGVUK3VlNTNnZjNacG81YWc1ZkdvdHZ4T1Y0SVRhWnBxUmJLRHc9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.5.0_x64-setup.exe"
     }
   }
 }
