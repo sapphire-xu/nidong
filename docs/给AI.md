@@ -51,8 +51,9 @@ nidong/
       pages/Settings.tsx   设置页外壳，内容转给 SettingsPanel
       pages/Doors.tsx      任意门
       pages/Home.tsx       主页
-      pages/Toolbox.tsx    工具箱。校园网自动登录、免流文件分享、防社死设置
+      pages/Toolbox.tsx    工具箱。校园网自动登录、免流文件分享、防社死设置、定时下载
       pages/Share.tsx      免流文件分享：本机网页、口令、拖放和添加文件
+      pages/Fetch.tsx      定时下载：链接、时刻、文件夹、下完关机、系统代理
       pages/NetPanel.tsx   网费页：计费规则、本机流量记录
       updateCheck.ts      向 Gitee 检查新版本，失败只返回 failed
     Settings.tsx     设置表单 SettingsPanel：六类；退出登录在底部
@@ -69,6 +70,7 @@ nidong/
     wlan.rs          Windows wlanapi，按配置名连接
     meter_cmd.rs     网费页开关本机流量记录。计数在 src-tauri/meter
     smart_mute.rs    防社死 · 智能静音。默认输出静音、无音频计时、课程/日程时间段
+    fetch.rs         定时下载。到点拉取 http(s)，断点续传，可选下完关机
     ipgw.rs          网关登录。单独客户端，不打开浏览器
     client.rs        CAS / 卡 / 网 / 电 / 账单
     course.rs        教务 JSON → SemesterTable，以及该不该打教务
@@ -216,6 +218,7 @@ nidong/
 | 登录、卡、网、电、账单 | `src-tauri/src/client.rs` |
 | 网费计费说明、本机流量记录 | `ui/src/desk/pages/NetPanel.tsx`。0:00–6:00 不计费是这段文案，和电费夜里缓存不是一回事。记录进程在 `src-tauri/meter` |
 | 防社死 · 智能静音 | 页面 `ui/src/desk/pages/Toolbox.tsx`，看护 `src-tauri/src/smart_mute.rs`，字段在 `models.rs` / `types.ts` |
+| 定时下载 | 页面 `ui/src/desk/pages/Fetch.tsx`，任务在 `src-tauri/src/fetch.rs`。状态在 `fetch.json`，不要塞进 `AppSettings` |
 | 教务课表解析、每天打一次 | `src-tauri/src/course.rs`（规则见下） |
 | 托盘、`open_desk`、刷新编排 | `src-tauri/src/lib.rs` |
 | 岛的颜色和圆角 | `ui/src/styles.css` |
@@ -276,6 +279,7 @@ nidong/
 - 不要在检查更新失败时弹窗、改岛或挡住主页。正式包打开窗口时静默检查；只有关于页手动检查失败才写「暂时检查不到更新」
 - 不要在智能静音关闭时动系统静音，不要改音量，也不要在用户手动取消静音后立刻又静音
 - 不要发现新版本就自动下载。下载只发生在用户点「更新并重启」之后
+- 不要在过了 6 点后自动续传预定在 0:00–6:00 的定时下载。用户点「仍然继续」才可以在计费时段接着下
 
 ## 托盘
 
@@ -313,7 +317,7 @@ nidong/
 
 `desk` 创建时 `visible: false`、`focus: false`，wry 第一次登记的拖放接不住后来的 WebView。打开工作区时 `desk_drop` 再登记，路径走 `desk-file-drop`。悬浮岛的 `dragDropEnabled` 保持 false。
 
-是否在校园网，看当前无线名：`NEU`、`NEU-2.4G`、`NEU-Mobile`，或设置里的校园网名称。用 `wlan::query` 和 `campus::is_campus_net`。不要用 `probe_campus_net`，手机热点也能连上教务。不在这些名字上仍可开始，先确认，取消是默认。有线接入、无线名对不上也走这次确认。进这一页就弹说明，勾过 `shareHintDismissed` 则不弹。取消勾选后下次再弹。不要用只记一次的标记把再次进入吃掉。
+是否在校园网，看当前无线名：`NEU`、`NEU-2.4G`、`NEU-Mobile`，或设置里的校园网名称。用 `wlan::query` 和 `campus::is_campus_net`。不要用 `probe_campus_net`，手机热点也能连上教务。不在这些名字上仍可开始，先确认，取消是默认。有线接入、无线名对不上也走这次确认。进这一页就弹说明，其中一行加粗：「若分享网页打开速度极慢，请检查并关闭发送主机的下载任务。」勾过 `shareHintDismissed` 则不弹。取消勾选后下次再弹。不要用只记一次的标记把再次进入吃掉。
 
 服务只绑一个私网地址，不监听所有网卡。优先 `172.22.0.0/16`，其次 `10.0.0.0/8`，再 `192.168.0.0/16`。没有私网地址就不启动。局域网外访问不到这个地址。端口固定 `38721`，占用就写「38721 已被占用」。监听队列 256。同时下载最多 128 路，每路单独打开文件，按 64KB 送出，不把整个文件读进内存。
 
@@ -322,6 +326,20 @@ nidong/
 分享开着时，导航底部有状态药丸，点它进入这一页。颜色见视觉设计。`share_start` 成功和 `share_stop` 发 `share-changed`。打开窗口时用 `share_offer` 看一眼。
 
 下载地址是 `/f/{编号}`，不是名单里的第几个。编号在这一场分享里固定。命令：`share_describe`、`share_start`、`share_stop`、`share_offer`、`share_revise`、`share_on_campus`。
+
+## 定时下载
+
+工具箱第四格，名字是「定时下载」。没登录也能用。不往悬浮岛发状态，也不改托盘字。关掉窗口继续下，退出泥洞才停。一次一条队列，最多 20 个 http(s) 链接。
+
+时间默认下一个本地 0 点。0:00–6:00 是校园网校外 IPv4 下载不计费的时段，和电费夜里缓存不是一回事。用户改成别的钟点，就按下一次出现的那个时刻。到点才开始。文件进用户选的文件夹，默认「下载」。先写 `名字.partial`，每约 4MB `sync_all` 一次，下完再改成正式文件名。旁边的 `名字.partial.url` 记下链接，同一条链接再次预约会接着下；换了链接就另起文件名，不覆盖已经下完的文件。
+
+任务写在 `%APPDATA%\edu.neu.nidong\fetch.json`，不进 `settings.json`。进程还在、到点了，就下。预定在 0:00–6:00、当时没跑成的，只在**同一个**免费时段里补下（例如约了今天 0 点，4 点起来接着下）。过了 6 点记成错过，不自动下。用户自己选的计费时段，迟到 20 分钟以内还下，再晚就错过。正在下时断电或退出：进度还在；20 分钟内重新打开会续上；若这次预定在免费时段里，同日 6 点前重新打开也会续上。过了这个范围记成打断，页面上「仍然继续」才马上开始，并写明现在可能计费。下一天夜里的免费时段不会自动补前一天没下完的。
+
+「使用系统代理」默认关。旧的 `fetch.json` 缺这个字段也当关。读 Windows 的 Internet Settings（`ProxyEnable` / `ProxyServer`），没有再看 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`。SOCKS 不用。关掉就直连，环境变量也不走。本机和 `ProxyOverride` 里的地址不走代理。开了 TUN / WARP 时，开关开或关，流量都进隧道。代理出校门之后仍算校园网校外流量，白天一样计费。代理连不上时写明，不要改成「连不上学校站点」。
+
+「下载完成后关机」默认关。全部成功才 `shutdown /s /t 60`。有失败不关。退出泥洞不会取消已经发出的关机，页面上可以取消（`shutdown /a`）。命令：`fetch_status`、`fetch_arm`、`fetch_cancel`、`fetch_resume`。
+
+页面上断电和 Steam 收成一行：「夜间断电？想要Steam定时下载？点击 了解更多」。弹窗标题「了解更多」，三段：断电停在已落盘进度、过了 6 点不自动续；Steam 用自己的下载时段且不能下完关机；系统代理走 Windows 当前代理，TUN / WARP 开不开这项效果一样。页底一行：「请在下载时段保持电脑与泥洞开启」。电脑已经关机时，泥洞不能把它唤醒。Steam 的游戏不从这里下，也不要去改 Steam 的配置。
 
 ## 关于
 

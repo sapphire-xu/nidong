@@ -1,10 +1,11 @@
 import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Dropdown, Field, Input, Option, Switch } from "@fluentui/react-components";
-import { Clock20Regular, Share20Regular, SpeakerMute20Regular, Wifi120Regular } from "@fluentui/react-icons";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowDownload20Regular, Share20Regular, SpeakerMute20Regular, Wifi120Regular } from "@fluentui/react-icons";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import { clampIdleMinutes } from "../../prefs";
 import type { AppSettings } from "../../types";
 import { Threshold } from "../../Threshold";
+import { FetchPanel } from "./Fetch";
 import { SharePanel } from "./Share";
 
 const MODES: { value: NonNullable<AppSettings["campusWifiMode"]>; text: string }[] = [
@@ -27,13 +28,9 @@ function isCampusNet(name: string, configured: string) {
   return sameNet(name, configured) || CAMPUS_NETS.some((n) => sameNet(name, n));
 }
 
-const LATER: { icon: ReactNode }[] = [
-  { icon: <Clock20Regular /> },
-];
-
 export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSettings) => void; openShare?: number }) {
   const { settings, setSettings, openShare } = props;
-  const [page, setPage] = useState<"hub" | "campus" | "share" | "mute">(openShare ? "share" : "hub");
+  const [page, setPage] = useState<"hub" | "campus" | "share" | "mute" | "fetch">(openShare ? "share" : "hub");
   const [motion, setMotion] = useState<"idle" | "back">("idle");
   const sharePanelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -46,7 +43,7 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
     void el.offsetWidth;
     el.classList.add("settings-sub-content");
   }, [openShare]);
-  const openPage = (next: "hub" | "campus" | "share" | "mute") => {
+  const openPage = (next: "hub" | "campus" | "share" | "mute" | "fetch") => {
     setMotion(next === "hub" && page !== "hub" ? "back" : "idle");
     setPage(next);
   };
@@ -86,7 +83,7 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
           <div className="settings-breadcrumb">
             <button type="button" className="settings-breadcrumb-link" onClick={() => openPage("hub")}>工具箱</button>
             <span aria-hidden="true">›</span>
-            <h1 className="page-title">{page === "campus" ? "校园网自动登录" : page === "share" ? "免流文件分享" : "防社死设置"}</h1>
+            <h1 className="page-title">{page === "campus" ? "校园网自动登录" : page === "share" ? "免流文件分享" : page === "mute" ? "防社死设置" : "定时下载"}</h1>
           </div>
         )}
       </div>
@@ -104,12 +101,15 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
             <span className="tool-ico" aria-hidden="true"><SpeakerMute20Regular /></span>
             <span className="tool-name">防社死设置</span>
           </button>
-          {LATER.map((item, i) => (
-            <button key={i} type="button" className="tool-tile is-wait" disabled>
-              <span className="tool-ico" aria-hidden="true">{item.icon}</span>
-              <span className="tool-name">敬请期待</span>
-            </button>
-          ))}
+          <button type="button" className="tool-tile on" onClick={() => openPage("fetch")}>
+            <span className="tool-ico" aria-hidden="true"><ArrowDownload20Regular /></span>
+            <span className="tool-name">定时下载</span>
+          </button>
+        </div>
+      ) : null}
+      {page === "fetch" ? (
+        <div className="settings-sub-content">
+          <FetchPanel />
         </div>
       ) : null}
       {page === "share" ? (

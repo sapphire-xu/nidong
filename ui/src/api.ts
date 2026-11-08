@@ -43,6 +43,11 @@ export const api = {
   meterEnable: () => invoke<void>("meter_enable"),
   meterDisable: () => invoke<void>("meter_disable"),
   meterOpenLog: () => invoke<void>("meter_open_log"),
+  fetchStatus: () => invoke<FetchStatus>("fetch_status"),
+  fetchArm: (urls: string, time: string, dir: string, shutdown: boolean, useProxy: boolean) =>
+    invoke<FetchStatus>("fetch_arm", { urls, time, dir, shutdown, useProxy }),
+  fetchCancel: () => invoke<FetchStatus>("fetch_cancel"),
+  fetchResume: () => invoke<FetchStatus>("fetch_resume"),
 };
 
 export type ShareFile = { id?: number; path: string; name: string; bytes: number };
@@ -83,6 +88,28 @@ export type MeterStatus = {
 };
 
 export type MeterDay = { date: string; totals: MeterTotals };
+
+export type FetchFile = {
+  url: string;
+  name: string;
+  phase: string;
+  received: number;
+  total?: number | null;
+  error: string;
+};
+
+export type FetchStatus = {
+  phase: string;
+  when: string;
+  dir: string;
+  shutdown: boolean;
+  useProxy: boolean;
+  proxy: string;
+  proxyKind: string;
+  note: string;
+  links: string;
+  files: FetchFile[];
+};
 
 export type ShareOffer = {
   url: string;

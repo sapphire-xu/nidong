@@ -419,6 +419,7 @@ export function SharePanel(props: { settings: AppSettings; onSettings: (patch: P
               <p>关掉窗口也会继续分享，退出泥洞/停止分享才会停。</p>
               <p>分享开始后也可以增删文件。拖入同名文件，以新的那份为准。</p>
               <p>对方打不开页面时，请检查防火墙中设置允许泥洞访问公用网络。</p>
+              <p><strong>若分享网页打开速度极慢，请检查并关闭发送主机的下载任务。</strong></p>
               <p><strong>文件传输接受学校监管，请遵守网络规则。</strong></p>
             </DialogContent>
             <DialogActions fluid>

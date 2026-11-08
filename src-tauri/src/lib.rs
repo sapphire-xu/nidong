@@ -16,6 +16,7 @@ mod meter_cmd;
 mod public_ip;
 mod share;
 mod smart_mute;
+mod fetch;
 mod wlan;
 
 use client::{
@@ -1833,6 +1834,8 @@ pub fn run() {
                 data_dir: data_dir.clone(),
             });
             app.manage(smart_mute::start(app.handle().clone()));
+            app.manage(fetch::FetchHub::open(data_dir.clone()));
+            fetch::spawn(app.handle().clone());
 
             if let Some(win) = app.get_webview_window("main") {
                 place_window(&win, &settings);
@@ -2037,7 +2040,11 @@ pub fn run() {
             meter_cmd::meter_log,
             meter_cmd::meter_enable,
             meter_cmd::meter_disable,
-            meter_cmd::meter_open_log
+            meter_cmd::meter_open_log,
+            fetch::fetch_status,
+            fetch::fetch_arm,
+            fetch::fetch_cancel,
+            fetch::fetch_resume
         ])
         .build(tauri::generate_context!())
         .expect("泥洞启动失败");

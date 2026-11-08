@@ -1166,12 +1166,40 @@ button.mix-row:focus-visible,
   text-align: left;
   transition: transform 120ms ease;
 }
+.hint .safety-ask { display: inline; vertical-align: baseline; }
 .safety-ask:hover { text-decoration: underline; }
 .safety-ask:active { transform: translateY(1px); }
 .safety-dialog { width: min(440px, calc(100vw - 48px)); max-width: 440px; }
 .safety-copy { display: flex; flex-direction: column; gap: 10px; }
 .safety-copy p { margin: 0; font-size: 14px; line-height: 1.65; }
 .safety-warn { font-weight: 650; }
+.fetch-links {
+  width: 100%;
+  min-height: 96px;
+  box-sizing: border-box;
+  resize: vertical;
+  border-radius: 4px;
+  border: 1px solid var(--colorNeutralStroke1);
+  background: var(--colorNeutralBackground1);
+  color: inherit;
+  padding: 8px 10px;
+  font: inherit;
+  line-height: 1.45;
+}
+.fetch-links:focus {
+  outline: none;
+  border-color: var(--colorBrandStroke1);
+}
+.fetch-links:disabled {
+  color: var(--colorNeutralForegroundDisabled, var(--colorNeutralForeground3));
+}
+.fetch-time { max-width: 120px; }
+.fetch-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.fetch-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; line-height: 1.4; }
+.fetch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fetch-meta { flex: none; color: var(--colorNeutralForeground3); }
+.fetch-meta.bad { color: var(--warn, #c45a12); }
+.fetch-actions { display: flex; gap: 8px; }
 .ssid-row { display: flex; align-items: center; gap: 8px; }
 .ssid-row .fui-Input { flex: 1; min-width: 0; }
 .ssid-row .fui-Button { flex: none; white-space: nowrap; }
