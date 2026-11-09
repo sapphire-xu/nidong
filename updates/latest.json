@@ -1,11 +1,11 @@
 {
-  "version": "2.5.0",
-  "notes": "工具箱新增定时下载，可以约到下一个 0 点再下链接，下完可以选择关机。",
-  "pub_date": "2026-11-08T12:17:56Z",
+  "version": "2.5.1",
+  "notes": "本机 127.0.0.1 互传不再同时算进校内下载和上传。主页点电费卡片即可修改房间码。",
+  "pub_date": "2026-11-09T04:52:04Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDc1b2grNkJJWTVMeno0aWxJQTI1WVN1a1FlUFoyME9qUFc0MUd6YmtSblFjMHpRQ1RFdVRBYW1mK2pBd00wbE9HTjBlc3B6KzVxRndrVXNwc3RHemdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MTQwMjc2CWZpbGU65rOl5rSeXzIuNS4wX3g2NC1zZXR1cC5leGUKN0U3SG9XL2d0TVdiZG9uL2t6MmhoMnFYVWh2NnNYMnVzT1BvRzB4WEx6SUNvcU1laGVUK3VlNTNnZjNacG81YWc1ZkdvdHZ4T1Y0SVRhWnBxUmJLRHc9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.5.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZHg5MUJGblMxNmpHZ04zU2dpYXlMTTB0a2ZlUW5hTGRDTm1CelNQQWk0YVNlUnJvTXVtczF4Njg4eHFGZ3BOY04rS3I2dDdWVTFmdG5rQ3dLTk1sY2c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MTk5OTI0CWZpbGU65rOl5rSeXzIuNS4xX3g2NC1zZXR1cC5leGUKYm1RYXMvTEFob2R6SWx4THBkcEtYeXFxMWZQQlgySSsrN0M3MHowczkwR0RHanNPMVhEOThQdUIydHJhQUxwNUFQREpjWVFUcjBXOTJISlQ2SnpEQUE9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.5.1_x64-setup.exe"
     }
   }
 }
