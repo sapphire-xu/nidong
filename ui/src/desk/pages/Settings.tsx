@@ -14,6 +14,7 @@ export function SettingsPage(props: {
   onPreviewRemind: () => void;
   loggedIn: boolean;
   onRequestLogin: () => void;
+  start?: "hub" | "dorm";
 }) {
   return <SettingsPanel {...props} />;
 }

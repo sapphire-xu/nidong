@@ -26,7 +26,10 @@ import {
   Window20Regular,
 } from "@fluentui/react-icons";
 import type { AppSettings, SemesterTable } from "./types";
+import { api } from "./api";
 import { Threshold } from "./Threshold";
+
+const ROOM_LOOKUP = "https://hqglc.neu.edu.cn/2021/1020/c2465a204768/page.htm";
 
 type Page = "hub" | "appearance" | "dorm" | "schedule" | "account" | "panel" | "remind";
 
@@ -186,9 +189,10 @@ export function SettingsPanel(props: {
   onPreviewRemind: () => void;
   loggedIn: boolean;
   onRequestLogin: () => void;
+  start?: "hub" | "dorm";
 }) {
   const { settings, setSettings, semester, cacheLabel, courseSync, courseSyncErr, offline, onSync, onLogout, onPreviewRemind, loggedIn, onRequestLogin } = props;
-  const [page, setPage] = useState<Page>("hub");
+  const [page, setPage] = useState<Page>(props.start === "dorm" ? "dorm" : "hub");
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [motion, setMotion] = useState<"idle" | "back">("idle");
   const openPage = (next: Page) => {
@@ -272,6 +276,17 @@ export function SettingsPanel(props: {
               onChange={(_, d) => set({ roomNo: d.value })}
             />
           </Field>
+          <p className="hint">
+            编号规则：宿舍 3 位 + 寝室号 4 位，不足 4 位在前面加 0。
+            {" "}
+            <button
+              type="button"
+              className="about-mail"
+              onClick={() => { void api.openDoor(ROOM_LOOKUP, "direct").catch(() => undefined); }}
+            >
+              宿舍编号查询页
+            </button>
+          </p>
           <p className="hint">改过房间码的话，离开设置会重新拉电费。</p>
           <Threshold label="卡低于（元）" value={s.cardWarn} max={500} onCommit={(cardWarn) => set({ cardWarn })} />
           <Threshold label="网低于（元）" value={s.netWarn} max={200} onCommit={(netWarn) => set({ netWarn })} />

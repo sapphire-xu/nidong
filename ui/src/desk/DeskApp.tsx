@@ -55,6 +55,7 @@ export function DeskApp() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [page, setPage] = useState<Page>("home");
+  const [settingsStart, setSettingsStart] = useState<"hub" | "dorm">("hub");
   const [billTab, setBillTab] = useState<"card" | "net">("card");
   const [err, setErr] = useState("");
   const [refreshUi, setRefreshUi] = useState<"idle" | "spin" | "ok">("idle");
@@ -379,6 +380,7 @@ export function DeskApp() {
               selectedValue={page}
               onNavItemSelect={(_, data) => {
                 const value = String(data.value || "");
+                if (value === "settings") setSettingsStart("hub");
                 if (value === "home" || value === "schedule" || value === "bills" || value === "toolbox" || value === "doors" || value === "settings" || value === "about") {
                   selectPage(value);
                 }
@@ -433,6 +435,10 @@ export function DeskApp() {
                       setBillTab(tab);
                       selectPage("bills");
                     }}
+                    onOpenDorm={() => {
+                      setSettingsStart("dorm");
+                      selectPage("settings");
+                    }}
                     onOpenSchedule={() => selectPage("schedule")}
                     onOpenEvent={openEvent}
                     onSyncCourses={doSyncCourses}
@@ -465,6 +471,8 @@ export function DeskApp() {
                 )}
                 {page === "settings" && settings && (
                   <SettingsPage
+                    key={settingsStart}
+                    start={settingsStart}
                     settings={settings}
                     setSettings={updateSettings}
                     semester={snap.semester}

@@ -130,6 +130,7 @@ export function Home(props: {
   courseSync: "idle" | "spin" | "ok" | "fail";
   onRefresh: () => void;
   onOpenBills: (tab: "card" | "net") => void;
+  onOpenDorm: () => void;
   onOpenSchedule: () => void;
   onOpenEvent: (item: Agenda | null) => void;
   onSyncCourses: () => void;
@@ -256,7 +257,7 @@ export function Home(props: {
           </button>
         </Card>
         <Card className={!loggedIn ? undefined : elecWarn ? "warn-card" : undefined}>
-          <div className="card-hit">
+          <button type="button" className="card-hit" onClick={props.onOpenDorm}>
             <div className="card-k">电费</div>
             {!loggedIn ? (
               <>
@@ -288,7 +289,7 @@ export function Home(props: {
                 <div className="card-u">度</div>
               </>
             )}
-          </div>
+          </button>
         </Card>
       </div>
 
