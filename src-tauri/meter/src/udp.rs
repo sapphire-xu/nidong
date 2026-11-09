@@ -19,7 +19,7 @@ use windows::Win32::System::Diagnostics::Etw::{
 
 use crate::netif::{self, VirtualAddrs};
 use crate::place::{v4_is_campus_public, v6_is_campus};
-use crate::sample::{ipv4_is_local, v6_is_global};
+use crate::sample::{ipv4_is_local, v4_is_loopback, v6_is_global, v6_is_loopback};
 use crate::store::Totals;
 
 const SESSION: &str = "NidongMeterUdp";
@@ -192,7 +192,7 @@ fn v4_flow(data: &[u8], send: bool, tcp: bool, virtuals: &VirtualAddrs) -> Flow 
     let Some(saddr) = read_v4(data, 12) else {
         return Flow::default();
     };
-    if virtuals.is_v4(&daddr) || virtuals.is_v4(&saddr) {
+    if virtuals.is_v4(&daddr) || virtuals.is_v4(&saddr) || v4_is_loopback(daddr) || v4_is_loopback(saddr) {
         return Flow::default();
     }
     let mut flow = Flow::default();
@@ -221,7 +221,7 @@ fn v6_flow(data: &[u8], send: bool, tcp: bool, virtuals: &VirtualAddrs) -> Flow 
     let Some((daddr, saddr)) = read_v6(data) else {
         return Flow::default();
     };
-    if virtuals.is_v6(&daddr) || virtuals.is_v6(&saddr) {
+    if virtuals.is_v6(&daddr) || virtuals.is_v6(&saddr) || v6_is_loopback(&daddr) || v6_is_loopback(&saddr) {
         return Flow::default();
     }
     // ::ffff:a.b.c.d 是双栈套接字上的 IPv4。同一份数据报还会有 UDPv4 事件，这里再记就会两边各算一次。
@@ -484,6 +484,20 @@ mod tests {
         assert_eq!(day.v4_day, 1500);
         assert_eq!(night.v4_night, 1500);
         assert_eq!(day.v4_up, 0);
+    }
+
+    #[test]
+    fn loopback_is_not_campus_download_or_upload() {
+        let down = classify(11, &v4(false, 4000, [127, 0, 0, 1], [127, 0, 0, 1]));
+        assert_eq!(down, super::Flow::default());
+        let up = classify(10, &v4(true, 4000, [127, 0, 0, 1], [127, 0, 0, 1]));
+        assert_eq!(up, super::Flow::default());
+        let udp = classify(43, &v4(false, 200, [127, 0, 0, 1], [127, 0, 0, 8]));
+        assert_eq!(udp, super::Flow::default());
+        let mut lo = [0u8; 16];
+        lo[15] = 1;
+        assert_eq!(classify(26, &v6_event(500, lo, lo)), super::Flow::default());
+        assert_eq!(classify(27, &v6_event(500, lo, lo)), super::Flow::default());
     }
 
     #[test]

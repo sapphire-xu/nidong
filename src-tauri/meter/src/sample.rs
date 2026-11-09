@@ -203,9 +203,12 @@ impl Sampler {
             if row.state == MIB_TCP_STATE_LISTEN {
                 continue;
             }
-            if virtuals.is_v4(&row.local_addr.to_ne_bytes())
-                || virtuals.is_v4(&row.remote_addr.to_ne_bytes())
-            {
+            let local_oct = row.local_addr.to_ne_bytes();
+            let remote_oct = row.remote_addr.to_ne_bytes();
+            if virtuals.is_v4(&local_oct) || virtuals.is_v4(&remote_oct) {
+                continue;
+            }
+            if v4_is_loopback(local_oct) || v4_is_loopback(remote_oct) {
                 continue;
             }
             tick.tcp += 1;
@@ -232,7 +235,7 @@ impl Sampler {
                 remote_port: row.remote_port,
             };
             let (din, dout) = delta_of(&self.seen, still, key, inn, out);
-            let octets = row.remote_addr.to_ne_bytes();
+            let octets = remote_oct;
             if v4_billed(octets) {
                 if night {
                     tick.totals.v4_night += din;
@@ -274,6 +277,9 @@ impl Sampler {
             if virtuals.is_v6(&row.local) || virtuals.is_v6(&row.remote) {
                 continue;
             }
+            if v6_is_loopback(&row.local) || v6_is_loopback(&row.remote) {
+                continue;
+            }
             if !v6_is_global(&row.remote) {
                 continue;
             }
@@ -309,6 +315,14 @@ impl Sampler {
             tick.breakdown.v6_up += dout;
         }
     }
+}
+
+pub(crate) fn v4_is_loopback(o: [u8; 4]) -> bool {
+    o[0] == 127
+}
+
+pub(crate) fn v6_is_loopback(addr: &[u8; 16]) -> bool {
+    addr[..15] == [0u8; 15] && addr[15] == 1
 }
 
 pub fn ipv4_is_local(o: [u8; 4]) -> bool {
