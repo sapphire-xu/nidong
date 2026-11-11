@@ -3,7 +3,7 @@ use rand::rngs::OsRng;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::{Pkcs1v15Encrypt, RsaPublicKey};
 
-/// Fallback SPKI from login_neu.js ?v=20260302 (docs 6.2).
+/// Fallback SPKI. Same key in login_neu.js (?v=20260302) and login_neu_new.js (2026-11-11).
 pub const DEFAULT_PUB_B64: &str = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnjA28DLKXZzxbKmo9/1WkVLf1mr+wtLXLXt6sC4WiBCtsbzF5ewm7ARZeAdS3iZtqlYPn6IcUoOw42H8nAK/tfFcIb6dZ1K0atn0U39oWCGPzYuKtLJeMuNZiDXVuAXtojrckOjLW9B3gUnaNGLuIx0fYe66l0o9WjU2cGLNZQfiIxs2h00z1EA9IdSnVxiVQWSD+lsP3JZXh2TT287la4Y4603SQNKTK/QvXfcmccwTEd1IW6HwGxD6QrkInBiHisKWxmveN7UDSaQRZ/J97G0YC32pD38WT53izXeK0p/kU/X37VP555um1wVWFvPIuc9I7gMP1+hq5a+X6c++tQIDAQAB";
 
 pub fn sanitize_pub_b64(raw: &str) -> String {

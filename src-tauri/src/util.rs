@@ -281,10 +281,30 @@ pub fn hidden_fields(html: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// 登录页把没启用的面板放在 `<script type="text/html">` 里。那不是当前步骤。
+pub fn strip_html_templates(html: &str) -> String {
+    let Ok(re) = Regex::new(
+        r#"(?is)<script\b[^>]*\btype\s*=\s*['"]text/html['"][^>]*>.*?</script>"#,
+    ) else {
+        return html.to_string();
+    };
+    re.replace_all(html, "").into_owned()
+}
+
+/// 二次认证只看模板以外的正文。2026-11 的密码页把说明和占位号 `186****1233` 写在模板里。
+pub fn cas_needs_sms(html: &str) -> bool {
+    let live = strip_html_templates(html);
+    live.contains("当前设备需进行身份验证")
+        || live.contains("second_auth_form")
+        || live.contains("scendAuthCode")
+        || live.contains("getScendAuthCode")
+}
+
 pub fn phone_mask(html: &str) -> String {
+    let live = strip_html_templates(html);
     Regex::new(r"\*{3,}\d{4}")
         .ok()
-        .and_then(|re| re.find(html).map(|m| m.as_str().to_string()))
+        .and_then(|re| re.find(&live).map(|m| m.as_str().to_string()))
         .unwrap_or_else(|| "绑定手机".into())
 }
 
@@ -313,9 +333,19 @@ use chrono::Datelike;
 #[cfg(test)]
 mod tests {
     use super::{
-        attr_value, input_id_value, is_dead_proxy_err, is_offline_err, normalize_proxy, parse_money,
-        proxy_reachable,
+        attr_value, cas_needs_sms, input_id_value, is_dead_proxy_err, is_offline_err, normalize_proxy,
+        parse_money, phone_mask, proxy_reachable,
     };
+
+    #[test]
+    fn template_placeholder_is_not_a_bound_phone() {
+        let html = r#"<div class="phone">139****5678</div><script id="second_auth_template" type="text/html"><div class="phone-number">186****1233</div>当前设备需进行身份验证</script>"#;
+        assert_eq!(phone_mask(html), "****5678");
+        assert!(!cas_needs_sms(html));
+        assert!(cas_needs_sms(
+            r#"<form id="second_auth_form"><p>当前设备需进行身份验证</p></form>"#
+        ));
+    }
 
     #[test]
     fn sso_hidden_single_quotes() {

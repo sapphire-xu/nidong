@@ -410,6 +410,7 @@ impl NeuClient {
     }
 
     pub fn session_lost_html(html: &str) -> bool {
+        let html = crate::util::strip_html_templates(html);
         html.contains("当前设备需进行身份验证")
             || html.contains("second_auth_form")
             || (html.contains("id=\"un\"")
@@ -516,10 +517,7 @@ impl NeuClient {
     }
 
     fn login_needs_sms(html: &str) -> bool {
-        html.contains("当前设备需进行身份验证")
-            || html.contains("second_auth_form")
-            || html.contains("scendAuthCode")
-            || html.contains("getScendAuthCode")
+        crate::util::cas_needs_sms(html)
     }
 
     pub async fn login(&self, username: &str, password: &str) -> Result<LoginOutcome> {
@@ -1929,11 +1927,17 @@ mod tests {
 
     #[test]
     fn password_page_is_not_sms_challenge() {
-        let html = r#"<form id="loginForm"><input name="execution" value="e1s1"/><input id="lt" name="lt" value="LT-1"/><script id="mobile_template" type="text/html">手机登录</script></form>"#;
+        let html = r#"<form id="loginForm"><input name="execution" value="e1s1"/><input id="lt" name="lt" value="LT-1"/><input id="un"/><input id="pd"/><button id="index_login_btn"></button><script id="mobile_template" type="text/html">手机登录</script><script id="second_auth_template" type="text/html">为保障您的账号安全，当前设备需进行身份验证<div class="phone-number">186****1233</div></script></form>"#;
         assert!(
             !NeuClient::login_needs_sms(html),
             "password page templates must not look like 2FA"
         );
+        assert_eq!(
+            NeuClient::classify_cas_probe("", html),
+            SessionState::Expired,
+            "a password form is an expired session, not a device challenge"
+        );
+        assert_eq!(crate::util::phone_mask(html), "绑定手机");
     }
 
     #[test]

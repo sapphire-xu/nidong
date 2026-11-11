@@ -236,7 +236,10 @@ async fn rsa_key(client: &reqwest::Client, page: &str) -> Result<String, String>
 }
 
 fn script_src(html: &str) -> Option<String> {
-    let re = regex::Regex::new(r#"(?i)src\s*=\s*["']([^"']*login_neu\.js[^"']*)["']"#).ok()?;
+    let re = regex::Regex::new(
+        r#"(?i)src\s*=\s*["']([^"']*login_neu(?:_new)?\.js[^"']*)["']"#,
+    )
+    .ok()?;
     re.captures(html).map(|c| c[1].to_string())
 }
 
@@ -265,7 +268,7 @@ fn html_title(html: &str) -> String {
 }
 
 fn page_needs_sms(html: &str) -> bool {
-    html.contains("当前设备需进行身份验证") || html.contains("second_auth_form")
+    crate::util::cas_needs_sms(html)
 }
 
 fn page_needs_captcha(html: &str) -> bool {
@@ -329,6 +332,19 @@ mod tests {
         assert_eq!(transport_err("invalid peer certificate: UnknownIssuer"), "这不是校园网");
         assert_eq!(transport_err("CertNotValidForName"), "这不是校园网");
         assert!(transport_err("timed out").starts_with("网络不通"));
+    }
+
+    #[test]
+    fn new_login_script_and_template() {
+        let html = r#"<script src="/tpass/comm/neu/js/login_neu_new.js"></script><script id="second_auth_template" type="text/html">当前设备需进行身份验证<div>186****1233</div></script>"#;
+        assert_eq!(
+            script_src(html).as_deref(),
+            Some("/tpass/comm/neu/js/login_neu_new.js")
+        );
+        assert!(!page_needs_sms(html));
+        assert!(page_needs_sms(
+            r#"<p>当前设备需进行身份验证</p><form id="second_auth_form"></form>"#
+        ));
     }
 
     #[test]
