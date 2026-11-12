@@ -1,11 +1,11 @@
 {
-  "version": "2.5.3",
-  "notes": "课表地点不再带班级人数。安装目录新增 Argon 的 Apache-2.0 许可证全文。",
-  "pub_date": "2026-11-12T14:39:38Z",
+  "version": "2.5.4",
+  "notes": "教务没返回课程时，不再清空已有课表。",
+  "pub_date": "2026-11-12T15:14:39Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDhNK3kvNmVjeVFJbTdhZldaZU9oSEV1S0xxYXdCc2szbXM0R2lmSzZiakxlbEhMc1BWNjJ0NGt0cityTDIzeWZBZy9xT0tTKzBnMWRDbzhhREg3V0FZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDk0Mzc4CWZpbGU65rOl5rSeXzIuNS4zX3g2NC1zZXR1cC5leGUKcFBIQW9jZk5jSW1uRlU1NFgrb0tCdjRwTzN1OGRZQzRJMlp3V3poREd2aFVVaFpSUWw4Ukt3Y3FqUkU0dk1QdmdzbHExK1ZTUko1UFVCNkx5anNJQkE9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.5.3_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDRFYkhkNEduSHllQ1VIYmw2eUwybVZmUDY2eXl4VkdtSnJQWGVMZ3ZFaEV2VGlxYVhaOXl1ZEtUN2NZWU9LWXRuQy9LUjJ1Z2FlNGlZWDJMTHhFV1FjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDk2NDc4CWZpbGU65rOl5rSeXzIuNS40X3g2NC1zZXR1cC5leGUKQkZBUzYyMjZZSnpnUU16WHhJZ0xlcU1rMU9yOEgyMGR2amFXNVVIRDdhOHd0elZmYTUyQjhSV2ovaWQyVStMaDNUK2pEQm9xYlFxVExMRTBPZEUzRGc9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.5.4_x64-setup.exe"
     }
   }
 }
