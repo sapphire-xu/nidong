@@ -1,11 +1,11 @@
 {
-  "version": "2.5.2",
-  "notes": "一号通改版后可以正常登录。不会再被假的二次验证拦住。",
-  "pub_date": "2026-11-11T15:17:01Z",
+  "version": "2.5.3",
+  "notes": "课表地点不再带班级人数。安装目录新增 Argon 的 Apache-2.0 许可证全文。",
+  "pub_date": "2026-11-12T14:39:38Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZHdsRHFjSER3L0g4MDErN05YVUk3OEl3OGg5c3ZGSllHOGVtV1A4SnJRZ3NVZFhMSkxvdGxramVwWlpQTGc5dC9LWENndTkwWUtJdC9WaFp2WHpNZmc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDEwMjIxCWZpbGU65rOl5rSeXzIuNS4yX3g2NC1zZXR1cC5leGUKOTVpak9heFpnSU4wNXdNWnB6bm82eUhuYmFEUmN5UzJZeFhDU1VyZC9VR0NhQVBDcUJ2bllaYVkvdWR1ajJlTmRKU3lQc29pbmNjaEtUd3BsRTNSQUE9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.5.2_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDhNK3kvNmVjeVFJbTdhZldaZU9oSEV1S0xxYXdCc2szbXM0R2lmSzZiakxlbEhMc1BWNjJ0NGt0cityTDIzeWZBZy9xT0tTKzBnMWRDbzhhREg3V0FZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDk0Mzc4CWZpbGU65rOl5rSeXzIuNS4zX3g2NC1zZXR1cC5leGUKcFBIQW9jZk5jSW1uRlU1NFgrb0tCdjRwTzN1OGRZQzRJMlp3V3poREd2aFVVaFpSUWw4Ukt3Y3FqUkU0dk1QdmdzbHExK1ZTUko1UFVCNkx5anNJQkE9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.5.3_x64-setup.exe"
     }
   }
 }
