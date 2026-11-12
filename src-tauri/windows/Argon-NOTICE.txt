@@ -6,7 +6,7 @@ Copyright 2013 The Android Open Source Project
 来源：platform/frameworks/base/data/sounds/notifications/ogg/Argon.ogg
 https://android.googlesource.com/platform/frameworks/base
 
-本文件按 Apache License 2.0 随泥洞分发。下面是该许可证全文。
+本文件按 Apache License 2.0 随泥洞分发。安装后它是明文，和 nidong.exe 在同一目录，不压在程序里面。下面是该许可证全文。
 
                                  Apache License
                            Version 2.0, January 2004

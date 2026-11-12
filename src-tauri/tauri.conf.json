@@ -55,6 +55,9 @@
     "active": true,
     "publisher": "sapphire_fic",
     "targets": ["nsis"],
+    "resources": {
+      "windows/Argon-NOTICE.txt": "Argon-NOTICE.txt"
+    },
     "externalBin": ["binaries/nidong-meter"],
     "icon": [
       "icons/32x32.png",

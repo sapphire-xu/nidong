@@ -40,7 +40,7 @@
 
 ## 安装（Windows）
 
-需要 64 位 Windows。已经装了 2.0.1 或更高版本的，打开窗口会检查到新版本，点「更新并重启」才下载。新安装下载 [GitHub Releases](https://github.com/sapphire-xu/nidong/releases/latest) 里的 `nidong_2.3.9_x64-setup.exe`，或 Gitee 仓库 `updates` 目录里的同一份。GitHub 仓库的 `updates` 目录里也有。装好后开始菜单里的名字是「泥洞」。
+需要 64 位 Windows。已经装了 2.0.1 或更高版本的，打开窗口会检查到新版本，点「更新并重启」才下载。新安装从 [GitHub Releases](https://github.com/sapphire-xu/nidong/releases/latest) 下载最新版，或从 Gitee 仓库 `updates` 目录下载同一份。GitHub 仓库的 `updates` 目录里也有。装好后开始菜单里的名字是「泥洞」。
 
 macOS / Linux 版本还未支持，若有愿意提供测试环境的可与作者联系，我将感激不尽。
 
@@ -99,6 +99,6 @@ npm start
 
 ## 许可
 
-[MIT](LICENSE)。学校的页面、接口和数据归东北大学，本仓库只覆盖泥洞自己的代码。
+[MIT](LICENSE)。学校的页面、接口和数据归东北大学，本仓库只覆盖泥洞自己的代码。提醒铃声 Argon 另按 Apache-2.0 分发，全文和来源说明在 [src-tauri/windows/Argon-NOTICE.txt](src-tauri/windows/Argon-NOTICE.txt)，安装后和程序在同一目录。
 
 联系作者：[xufeiyang@mails.neu.edu.cn](mailto:xufeiyang@mails.neu.edu.cn)。

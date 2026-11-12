@@ -1099,6 +1099,7 @@ fn place_has_room(p: &str) -> bool {
 }
 
 fn resolve_seg_place(cell_place: &str, seg: &WeekSeg, multi: bool, sibling_has_room: bool) -> String {
+    let cell_place = tidy_place(cell_place);
     let seg_p = seg
         .place
         .as_deref()
@@ -1114,14 +1115,14 @@ fn resolve_seg_place(cell_place: &str, seg: &WeekSeg, multi: bool, sibling_has_r
         if sibling_has_room {
             return String::new();
         }
-        return cell_place.to_string();
+        return cell_place;
     }
     if let Some(p) = seg_p {
         if place_has_room(&p) || cell_place.is_empty() {
             return p;
         }
     }
-    cell_place.to_string()
+    cell_place
 }
 
 /// 把「14-15周 薛丽芳 浑南校区1号B409」拆成多段，每段自己的周次和老师。
@@ -1188,11 +1189,37 @@ fn tidy_place(p: &str) -> String {
     let s = regex::Regex::new(r"号\s+")
         .map(|re| re.replace_all(&s, "号").into_owned())
         .unwrap_or(s);
-    if s.is_empty() {
+    let s = if s.is_empty() {
         campus_only.unwrap_or("").to_string()
     } else {
         s
+    };
+    strip_class_roster(&s)
+}
+
+/// `电信类2602(30),电信类2601(30)`、`计算机类2610-12`、`人工智能（知行英才班）2601-03`。
+/// 只去掉地点开头或结尾的班级名单，教室名留着。
+fn strip_class_roster(s: &str) -> String {
+    let token = r"[\u{4e00}-\u{9fff}]{2,16}(?:[（(][^）)]{1,20}[）)])?\d{4}(?:-\d{2,4})?(?:[（(]\d{1,4}[）)])?";
+    let trailing = regex::Regex::new(&format!(
+        r"(^|[\s,，、)）])((?:{token})(?:[\s,，、]+(?:{token}))*)\s*$"
+    ))
+    .expect("class roster");
+    let mut out = s.to_string();
+    if let Some(c) = trailing.captures(&out) {
+        let whole = c.get(0).unwrap();
+        let boundary = c.get(1).unwrap().as_str();
+        let mut kept = out[..whole.start()].to_string();
+        if boundary == ")" || boundary == "）" {
+            kept.push_str(boundary);
+        }
+        out = kept.trim().trim_end_matches([',', '，', '、', ' ']).trim().to_string();
     }
+    let leading = regex::Regex::new(&format!(
+        r"^(?:{token})(?:[\s,，、]+(?:{token}))*[\s,，、]+"
+    ))
+    .expect("class roster lead");
+    leading.replace(&out, "").trim().to_string()
 }
 
 fn catalog_items(v: &Value) -> Vec<&Value> {
@@ -1678,6 +1705,7 @@ pub fn parse_courses(items: &[Value], scheduled: Option<Campus>) -> Vec<Course> 
         };
         if segs.is_empty() {
             let mut c = base;
+            c.place = tidy_place(&c.place);
             c.teacher = sanitize_teacher(c.teacher);
             draft.push((c, campus_name));
         } else {
@@ -2018,6 +2046,56 @@ mod tests {
         assert_eq!(segs.len(), 1);
         assert_eq!(segs[0].weeks, vec![4, 7, 8]);
         assert!(segs[0].teacher.as_ref().unwrap().contains("曾觉吾"));
+    }
+
+    #[test]
+    fn place_drops_class_roster() {
+        assert_eq!(
+            tidy_place("人工智能实验室(信息学馆A201) 电信类2602(30),电信类2601(30)"),
+            "人工智能实验室(信息学馆A201)"
+        );
+        assert_eq!(
+            tidy_place("人工智能实验室（信息学馆A201)电信类2602(30),电信类2601(30)"),
+            "人工智能实验室（信息学馆A201)"
+        );
+        assert_eq!(
+            tidy_place("电信类2602(30),电信类2601(30) 人工智能实验室(信息学馆A201)"),
+            "人工智能实验室(信息学馆A201)"
+        );
+        assert_eq!(tidy_place("1号A204 计算机类2610-12"), "1号A204");
+        assert_eq!(
+            tidy_place("浑南校区 人工智能（知行英才班）2601-03,物联网2601-02 1号B323"),
+            "1号B323"
+        );
+        assert_eq!(tidy_place("1号A204"), "1号A204");
+        assert_eq!(tidy_place("1号B409-微机室"), "1号B409-微机室");
+        assert_eq!(tidy_place("生命 B213"), "生命 B213");
+        assert_eq!(tidy_place("何世礼 101"), "何世礼 101");
+        assert_eq!(tidy_place("信息A112"), "信息A112");
+        assert_eq!(tidy_place("文管A129"), "文管A129");
+        assert_eq!(tidy_place("南湖操场"), "南湖操场");
+        assert_eq!(tidy_place("浑南校区1号A304"), "1号A304");
+
+        let items = json!([{
+            "courseName": "[实]程序设计基础（C语言）-C语言：程序跟踪与调试",
+            "placeName": "人工智能实验室(信息学馆A201) 电信类2602(30),电信类2601(30)",
+            "campusName": "浑南校区",
+            "dayOfWeek": 3,
+            "beginSection": 5,
+            "endSection": 8,
+            "beginTime": "14:00",
+            "endTime": "17:40",
+            "titleDetail": [
+                "电信类2602(30),电信类2601(30)",
+                "[实]程序设计基础（C语言）-C语言：程序跟踪与调试",
+                "11周 浑南校区 人工智能实验室(信息学馆A201) 电信类2602(30),电信类2601(30)"
+            ]
+        }]);
+        let cs = parse_courses(items.as_array().unwrap(), None);
+        assert_eq!(cs.len(), 1, "{cs:?}");
+        assert_eq!(cs[0].place, "人工智能实验室(信息学馆A201)");
+        assert!(cs[0].name.contains("程序跟踪与调试"));
+        assert!(!cs[0].place.contains("电信类"));
     }
 
     #[test]
