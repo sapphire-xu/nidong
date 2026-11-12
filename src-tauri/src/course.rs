@@ -28,6 +28,40 @@ pub fn save_semester(dir: &Path, sem: &SemesterTable) -> Result<()> {
     Ok(())
 }
 
+/// 教务有时回 `code=0`，但 `datas.name` 是空的，三份列表也都是空的。
+/// 这是没认出学生，不是「这学期没课」。
+pub fn schedule_detail_unbound(v: &Value) -> bool {
+    let Some(datas) = v.get("datas").filter(|d| d.is_object()) else {
+        return false;
+    };
+    let name = datas.get("name").and_then(|n| n.as_str()).unwrap_or("").trim();
+    if !name.is_empty() {
+        return false;
+    }
+    let empty_list = |key: &str| {
+        datas
+            .get(key)
+            .and_then(|x| x.as_array())
+            .map(|a| a.is_empty())
+            .unwrap_or(false)
+    };
+    empty_list("arrangedList") && empty_list("notArrangeList") && empty_list("practiceList")
+}
+
+/// 空结果不能盖掉已经有课的缓存。没有旧课表时，空结果仍然可以留下。
+pub fn keep_courses_if_pull_empty(
+    cached: Option<&SemesterTable>,
+    pulled: SemesterTable,
+) -> std::result::Result<SemesterTable, &'static str> {
+    if !pulled.courses.is_empty() {
+        return Ok(pulled);
+    }
+    if cached.is_some_and(|old| !old.courses.is_empty()) {
+        return Err("这次没拉到课程，仍用上次的课表");
+    }
+    Ok(pulled)
+}
+
 pub fn monday_of(d: NaiveDate) -> NaiveDate {
     let wd = d.weekday().num_days_from_monday() as i64;
     d - Duration::days(wd)
@@ -2046,6 +2080,60 @@ mod tests {
         assert_eq!(segs.len(), 1);
         assert_eq!(segs[0].weeks, vec![4, 7, 8]);
         assert!(segs[0].teacher.as_ref().unwrap().contains("曾觉吾"));
+    }
+
+    #[test]
+    fn empty_shell_does_not_count_as_no_courses() {
+        let shell = json!({
+            "code": "0",
+            "datas": {
+                "arrangedList": [],
+                "notArrangeList": [],
+                "practiceList": [],
+                "code": null,
+                "name": null
+            }
+        });
+        assert!(schedule_detail_unbound(&shell));
+        let real_empty = json!({
+            "code": "0",
+            "datas": {
+                "arrangedList": [],
+                "notArrangeList": [],
+                "practiceList": [],
+                "code": "20260001",
+                "name": "丁一[20260001]"
+            }
+        });
+        assert!(!schedule_detail_unbound(&real_empty));
+        let old = SemesterTable {
+            semester_id: "2026-2027-1".into(),
+            label: "2026-2027 秋季学期".into(),
+            week1_monday: "2026-08-31".into(),
+            fetched_at: "2026-11-01T00:00:00+08:00".into(),
+            courses: vec![Course {
+                name: "高等数学".into(),
+                place: "1号A407".into(),
+                teacher: None,
+                start: "08:30".into(),
+                end: "10:10".into(),
+                weekday: 1,
+                weeks: Some(vec![3]),
+                sections: Some((1, 2)),
+                campus: Some("hunnan".into()),
+            }],
+            term_weeks: Vec::new(),
+        };
+        let pulled = SemesterTable {
+            courses: Vec::new(),
+            ..old.clone()
+        };
+        assert!(keep_courses_if_pull_empty(Some(&old), pulled).is_err());
+        let fresh = SemesterTable {
+            courses: Vec::new(),
+            ..old.clone()
+        };
+        assert!(keep_courses_if_pull_empty(None, fresh).is_ok());
     }
 
     #[test]

@@ -23,7 +23,8 @@ use client::{
     aggregate_month, load_month_cache, month_cache_fresh, save_month_cache, NeuClient, SessionState,
 };
 use course::{
-    apply_semester, fetched_local_date, load_semester, save_semester, semester_cache_stale,
+    apply_semester, fetched_local_date, keep_courses_if_pull_empty, load_semester, save_semester,
+    semester_cache_stale,
     should_fetch_courses,
 };
 
@@ -1313,13 +1314,18 @@ async fn refresh_inner(app: &AppHandle, state: &AppState, retry_courses: bool) -
         return Ok(state.snapshot.lock().unwrap().clone());
     }
 
-    let mut sem = cached_sem;
+    let mut sem = cached_sem.clone();
     match sem_res {
-        Some(Ok(s)) => {
-            let _ = save_semester(&data_dir, &s);
-            snap.errors.course = None;
-            sem = Some(s);
-        }
+        Some(Ok(s)) => match keep_courses_if_pull_empty(cached_sem.as_ref(), s) {
+            Ok(s) => {
+                let _ = save_semester(&data_dir, &s);
+                snap.errors.course = None;
+                sem = Some(s);
+            }
+            Err(msg) => {
+                snap.errors.course = Some(msg.to_string());
+            }
+        },
         Some(Err(e)) => {
             snap.network = if e.to_string().contains("校外") {
                 "offcampus".into()
@@ -1352,9 +1358,25 @@ async fn sync_courses(app: AppHandle, state: State<'_, AppState>) -> Result<Snap
     }
     let settings = state.settings.lock().unwrap().clone();
     let data_dir = state.data_dir.clone();
-    let sem = {
+    let pulled = {
         let c = live_client(&state).await?;
         with_timeout(90, c.fetch_semester()).await?
+    };
+    let cached = load_semester(&data_dir);
+    let sem = match keep_courses_if_pull_empty(cached.as_ref(), pulled) {
+        Ok(sem) => sem,
+        Err(msg) => {
+            let mut snap = state.snapshot.lock().unwrap().clone();
+            if let Some(old) = cached {
+                apply_semester(&mut snap, old, week1_opt(&settings.week1_monday));
+            }
+            snap.errors.course = Some(msg.to_string());
+            attach_local(&data_dir, &mut snap);
+            save_snapshot_file(&data_dir, &snap);
+            *state.snapshot.lock().unwrap() = snap.clone();
+            emit_snapshot(&app, &snap);
+            return Err(msg.into());
+        }
     };
     let _ = save_semester(&data_dir, &sem);
     let mut snap = state.snapshot.lock().unwrap().clone();

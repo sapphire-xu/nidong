@@ -1304,6 +1304,9 @@ impl NeuClient {
                 .await?
             }
         };
+        if crate::course::schedule_detail_unbound(&detail) {
+            return Err("教务没有返回你的课表".into());
+        }
         let arranged = parse_arranged_list(&detail);
         let scheduled = match self
             .jwxt_get(&format!(
