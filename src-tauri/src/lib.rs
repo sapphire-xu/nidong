@@ -20,7 +20,8 @@ mod fetch;
 mod wlan;
 
 use client::{
-    aggregate_month, load_month_cache, month_cache_fresh, save_month_cache, NeuClient, SessionState,
+    accept_month_pull, aggregate_month, load_month_cache, month_cache_fresh, save_month_cache,
+    NeuClient, SessionState,
 };
 use course::{
     apply_semester, fetched_local_date, keep_courses_if_pull_empty, load_semester, save_semester,
@@ -40,7 +41,7 @@ use error::Result;
 use models::*;
 use chrono::{Datelike, NaiveDate, Timelike};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -1000,6 +1001,41 @@ async fn refresh(app: AppHandle, state: State<'_, AppState>) -> Result<Snapshot>
     Ok(snap)
 }
 
+fn store_month_pull(
+    data_dir: &Path,
+    snap: &mut Snapshot,
+    year: i32,
+    month: u32,
+    list: Vec<Bill>,
+    truncated: bool,
+) {
+    let spend = aggregate_month(year, month, &list);
+    let old = load_month_cache(data_dir, year, month);
+    let month_id = format!("{year:04}-{month:02}");
+    if accept_month_pull(old.as_deref(), &spend) {
+        let _ = save_month_cache(data_dir, year, month, &spend);
+        snap.card_bills = Some(list);
+        snap.card_spend = Some(spend);
+        snap.card_month = Some(month_id);
+        snap.bills_truncated = Some(truncated);
+        if snap
+            .errors
+            .card
+            .as_deref()
+            .is_some_and(|s| s.contains("账单") || s.contains("流水"))
+        {
+            snap.errors.card = None;
+        }
+        return;
+    }
+    if let Some(cached) = old {
+        let bills = cached.iter().flat_map(|d| d.bills.clone()).collect();
+        snap.card_bills = Some(bills);
+        snap.card_spend = Some(cached);
+        snap.card_month = Some(month_id);
+    }
+}
+
 #[tauri::command]
 async fn load_month(state: State<'_, AppState>, year: i32, month: u32) -> Result<Snapshot> {
     let user = live_client(&state).await.ok().and_then(|c| c.username());
@@ -1023,13 +1059,8 @@ async fn load_month(state: State<'_, AppState>, year: i32, month: u32) -> Result
         with_timeout(15, c.fetch_bills_month(year, month)).await?
     };
     let (list, truncated) = bills;
-    let spend = aggregate_month(year, month, &list);
-    let _ = save_month_cache(&data_dir, year, month, &spend);
     let mut snap = state.snapshot.lock().unwrap();
-    snap.card_bills = Some(list);
-    snap.card_spend = Some(spend);
-    snap.card_month = Some(format!("{year:04}-{month:02}"));
-    snap.bills_truncated = Some(truncated);
+    store_month_pull(&data_dir, &mut snap, year, month, list, truncated);
     snap.username = user;
     attach_local(&data_dir, &mut snap);
     save_snapshot_file(&data_dir, &snap);
@@ -1293,15 +1324,7 @@ async fn refresh_inner(app: &AppHandle, state: &AppState, retry_courses: bool) -
             }
         }
         Some(Ok((list, truncated))) => {
-            let spend = aggregate_month(year, month, &list);
-            let _ = save_month_cache(&data_dir, year, month, &spend);
-            snap.card_bills = Some(list);
-            snap.card_spend = Some(spend);
-            snap.card_month = Some(format!("{year:04}-{month:02}"));
-            snap.bills_truncated = Some(truncated);
-            if snap.errors.card.as_deref().is_some_and(|s| s.contains("账单") || s.contains("流水")) {
-                snap.errors.card = None;
-            }
+            store_month_pull(&data_dir, &mut snap, year, month, list, truncated);
         }
         Some(Err(e)) => {
             if snap.card_spend.is_none() && snap.errors.card.is_none() {

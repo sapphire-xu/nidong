@@ -1832,6 +1832,20 @@ pub fn aggregate_month(year: i32, month: u32, bills: &[Bill]) -> Vec<DaySpend> {
     days
 }
 
+pub fn month_has_activity(spend: &[DaySpend]) -> bool {
+    spend.iter().any(|d| {
+        d.count > 0 || !d.bills.is_empty() || d.spend > 0.005 || d.recharge > 0.005
+    })
+}
+
+/// 新结果有流水就采用。新结果是 0 笔、本地该月已经有流水时返回 false，调用方不得写文件。
+pub fn accept_month_pull(old: Option<&[DaySpend]>, new_spend: &[DaySpend]) -> bool {
+    if month_has_activity(new_spend) {
+        return true;
+    }
+    !old.is_some_and(month_has_activity)
+}
+
 pub fn save_month_cache(dir: &Path, year: i32, month: u32, spend: &[DaySpend]) -> Result<()> {
     let p = dir.join(format!("bills-{}.json", yyyy_mm(year, month)));
     fs::write(p, serde_json::to_vec_pretty(spend)?)?;
@@ -2076,6 +2090,43 @@ mod tests {
             "https://pass.neu.edu.cn/tpass/login?service=x",
             r#"<form id="second_auth_form"><input name="scendAuthCode"/><p>当前设备需进行身份验证</p></form>"#
         ));
+    }
+
+    #[test]
+    fn empty_pull_keeps_month_that_already_has_rows() {
+        let row = DaySpend {
+            date: "2026-11-02".into(),
+            spend: 12.5,
+            recharge: 0.0,
+            count: 1,
+            bills: vec![Bill {
+                time: "2026-11-02T12:00:00".into(),
+                subject: "餐费支出".into(),
+                amount: -12.5,
+                fee: None,
+                balance_after: 100.0,
+                station: None,
+            }],
+        };
+        let old = vec![row];
+        let empty = vec![DaySpend {
+            date: "2026-11-01".into(),
+            spend: 0.0,
+            recharge: 0.0,
+            count: 0,
+            bills: vec![],
+        }];
+        let fresh = vec![DaySpend {
+            date: "2026-11-03".into(),
+            spend: 6.0,
+            recharge: 0.0,
+            count: 1,
+            bills: vec![],
+        }];
+        assert!(!accept_month_pull(Some(&old), &empty));
+        assert!(accept_month_pull(Some(&old), &fresh));
+        assert!(accept_month_pull(None, &empty));
+        assert!(accept_month_pull(Some(&empty), &empty));
     }
 
     #[test]

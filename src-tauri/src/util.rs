@@ -122,13 +122,56 @@ pub fn is_dead_proxy_err(e: &impl std::fmt::Display) -> bool {
         || s.contains("connection refused")
 }
 
-pub fn detect_proxy() -> Option<String> {
+/// 直连失败时才用的代理候选。系统代理关着时返回空：不读环境变量，不读 ProxyServer，也不因为 7897/7890 有进程就改走 Clash。
+pub fn assemble_proxy_candidates(
+    env_values: impl IntoIterator<Item = impl AsRef<str>>,
+    system_enabled: bool,
+    system_server: Option<&str>,
+) -> Vec<String> {
+    if !system_enabled {
+        return Vec::new();
+    }
     let mut candidates: Vec<String> = Vec::new();
     let mut push = |s: String| {
         if !s.is_empty() && !candidates.iter().any(|c| c == &s) {
             candidates.push(s);
         }
     };
+    for v in env_values {
+        let t = v.as_ref().trim();
+        if !t.is_empty() {
+            push(normalize_proxy(t));
+        }
+    }
+    if let Some(url) = system_server.and_then(system_proxy_url) {
+        push(url);
+    }
+    candidates
+}
+
+fn system_proxy_url(server: &str) -> Option<String> {
+    let server = server.trim();
+    if server.is_empty() {
+        return None;
+    }
+    let host = if server.contains('=') {
+        server
+            .split(';')
+            .find_map(|p| p.strip_prefix("https=").or_else(|| p.strip_prefix("http=")))
+            .unwrap_or_else(|| server.split(';').next().unwrap_or(server))
+            .to_string()
+    } else {
+        server.to_string()
+    };
+    if host.is_empty() {
+        None
+    } else {
+        Some(normalize_proxy(&host))
+    }
+}
+
+pub fn detect_proxy() -> Option<String> {
+    let mut env_values = Vec::new();
     for k in [
         "HTTPS_PROXY",
         "https_proxy",
@@ -138,19 +181,11 @@ pub fn detect_proxy() -> Option<String> {
         "http_proxy",
     ] {
         if let Ok(v) = std::env::var(k) {
-            if !v.trim().is_empty() {
-                push(normalize_proxy(v.trim()));
-            }
+            env_values.push(v);
         }
     }
-    #[cfg(windows)]
-    {
-        if let Some(p) = windows_ie_proxy() {
-            push(p);
-        }
-    }
-    push("http://127.0.0.1:7897".into());
-    push("http://127.0.0.1:7890".into());
+    let (system_on, server) = windows_proxy_setting();
+    let candidates = assemble_proxy_candidates(env_values, allow_proxy_fallback(system_on), server.as_deref());
     for p in candidates {
         if proxy_reachable(&p) {
             return Some(p);
@@ -160,41 +195,82 @@ pub fn detect_proxy() -> Option<String> {
     None
 }
 
+fn allow_proxy_fallback(system_on: bool) -> bool {
+    #[cfg(windows)]
+    {
+        system_on
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = system_on;
+        true
+    }
+}
+
 #[cfg(windows)]
-#[allow(dead_code)]
-fn windows_ie_proxy() -> Option<String> {
-    use std::os::windows::process::CommandExt;
-    let out = std::process::Command::new("reg")
-        .args([
-            "query",
-            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings",
-            "/v",
-            "ProxyServer",
-        ])
-        .creation_flags(0x08000000)
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    let server = text
+fn windows_proxy_setting() -> (bool, Option<String>) {
+    if !windows_proxy_enabled() {
+        return (false, None);
+    }
+    (true, windows_proxy_server())
+}
+
+#[cfg(not(windows))]
+fn windows_proxy_setting() -> (bool, Option<String>) {
+    (false, None)
+}
+
+#[cfg(windows)]
+fn windows_proxy_enabled() -> bool {
+    reg_dword_nonzero(r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings", "ProxyEnable")
+}
+
+#[cfg(windows)]
+fn windows_proxy_server() -> Option<String> {
+    reg_sz(r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings", "ProxyServer")
+}
+
+#[cfg(windows)]
+fn reg_sz(key: &str, name: &str) -> Option<String> {
+    let text = reg_query(key, name)?;
+    let value = text
         .lines()
-        .find(|l| l.contains("ProxyServer"))?
+        .find(|l| l.contains(name))?
         .split_whitespace()
         .last()?
         .trim()
         .to_string();
-    if server.is_empty() {
+    if value.is_empty() { None } else { Some(value) }
+}
+
+#[cfg(windows)]
+fn reg_dword_nonzero(key: &str, name: &str) -> bool {
+    let Some(text) = reg_query(key, name) else {
+        return false;
+    };
+    let Some(token) = text
+        .lines()
+        .find(|l| l.contains(name))
+        .and_then(|l| l.split_whitespace().last())
+    else {
+        return false;
+    };
+    let hex = token.trim_start_matches("0x").trim_start_matches("0X");
+    u32::from_str_radix(hex, 16).unwrap_or(0) != 0
+}
+
+#[cfg(windows)]
+fn reg_query(key: &str, name: &str) -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    let out = std::process::Command::new("reg")
+        .args(["query", key, "/v", name])
+        .creation_flags(0x08000000)
+        .output()
+        .ok()?;
+    if !out.status.success() {
         return None;
     }
-    let host = if server.contains('=') {
-        server
-            .split(';')
-            .find_map(|p| p.strip_prefix("https=").or_else(|| p.strip_prefix("http=")))
-            .unwrap_or(server.split(';').next().unwrap_or(&server))
-            .to_string()
-    } else {
-        server
-    };
-    Some(normalize_proxy(&host))
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 pub fn decode_bytes(bytes: &[u8], content_type: Option<&str>) -> String {
@@ -333,8 +409,8 @@ use chrono::Datelike;
 #[cfg(test)]
 mod tests {
     use super::{
-        attr_value, cas_needs_sms, input_id_value, is_dead_proxy_err, is_offline_err, normalize_proxy,
-        parse_money, phone_mask, proxy_reachable,
+        assemble_proxy_candidates, attr_value, cas_needs_sms, input_id_value, is_dead_proxy_err,
+        is_offline_err, normalize_proxy, parse_money, phone_mask, proxy_reachable,
     };
 
     #[test]
@@ -355,6 +431,23 @@ mod tests {
         assert_eq!(
             attr_value(html, "auid").as_deref(),
             Some("76F9B2B95810A748E9B77212474489C2")
+        );
+    }
+
+    #[test]
+    fn system_proxy_off_does_not_use_an_open_clash_port() {
+        let none: [&str; 0] = [];
+        let off = assemble_proxy_candidates(none, false, Some("127.0.0.1:7897"));
+        assert!(off.is_empty());
+        let server_left_behind = assemble_proxy_candidates(none, false, Some("127.0.0.1:7890"));
+        assert!(server_left_behind.is_empty());
+        assert_eq!(
+            assemble_proxy_candidates(none, true, Some("127.0.0.1:7897")),
+            vec!["http://127.0.0.1:7897".to_string()]
+        );
+        assert!(
+            assemble_proxy_candidates(["http://127.0.0.1:7897"], false, Some("127.0.0.1:7897"))
+                .is_empty()
         );
     }
 
