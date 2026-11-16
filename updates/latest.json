@@ -1,11 +1,11 @@
 {
-  "version": "2.5.4",
-  "notes": "教务没返回课程时，不再清空已有课表。",
-  "pub_date": "2026-11-12T15:14:39Z",
+  "version": "2.5.5",
+  "notes": "已有流水的月份，空的同步不再把账单清掉。系统代理关着时，连不上学校就停在直连，不再改走 Clash。",
+  "pub_date": "2026-11-16T01:10:48Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDRFYkhkNEduSHllQ1VIYmw2eUwybVZmUDY2eXl4VkdtSnJQWGVMZ3ZFaEV2VGlxYVhaOXl1ZEtUN2NZWU9LWXRuQy9LUjJ1Z2FlNGlZWDJMTHhFV1FjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDk2NDc4CWZpbGU65rOl5rSeXzIuNS40X3g2NC1zZXR1cC5leGUKQkZBUzYyMjZZSnpnUU16WHhJZ0xlcU1rMU9yOEgyMGR2amFXNVVIRDdhOHd0elZmYTUyQjhSV2ovaWQyVStMaDNUK2pEQm9xYlFxVExMRTBPZEUzRGc9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.5.4_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDRzM3NmZHpZbUIyY1pka1RyajdLL3E5UFBnMG5MSWpnY09wbTVNdEZ0SkhCaVZNd25CaUViNkM4STB5R09hQkhBZjlDWGs4UmprcEh4NGV6SXk2RGdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NzkxNDQ4CWZpbGU65rOl5rSeXzIuNS41X3g2NC1zZXR1cC5leGUKaGN1bWFFdC8zVTdSaTFtQmE5NnBiRE1rc2orOFlBbmdTdlBUdkpWL09RS3BpTU1SVFZ6cnZvd0ZVQmFRUW5JdldXdVd5QXc1S3U5MGtGMWhKeC9kQkE9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.5.5_x64-setup.exe"
     }
   }
 }
