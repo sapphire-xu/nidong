@@ -1,11 +1,11 @@
 {
-  "version": "2.5.5",
-  "notes": "已有流水的月份，空的同步不再把账单清掉。系统代理关着时，连不上学校就停在直连，不再改走 Clash。",
-  "pub_date": "2026-11-16T01:10:48Z",
+  "version": "3.0.0",
+  "notes": "新增独立插件兼容底座（支持 WebView / MCP 插件的安装、启停、沙箱隔离、独立 Cookie 与后台常驻）；日程周视图支持指针式 DDL 渲染；补充插件开发规范文档并更新关于页。",
+  "pub_date": "2026-11-24T06:34:27Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDRzM3NmZHpZbUIyY1pka1RyajdLL3E5UFBnMG5MSWpnY09wbTVNdEZ0SkhCaVZNd25CaUViNkM4STB5R09hQkhBZjlDWGs4UmprcEh4NGV6SXk2RGdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NzkxNDQ4CWZpbGU65rOl5rSeXzIuNS41X3g2NC1zZXR1cC5leGUKaGN1bWFFdC8zVTdSaTFtQmE5NnBiRE1rc2orOFlBbmdTdlBUdkpWL09RS3BpTU1SVFZ6cnZvd0ZVQmFRUW5JdldXdVd5QXc1S3U5MGtGMWhKeC9kQkE9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_2.5.5_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDlvb2ZSS2c1VUFzYUNDVVAyL29zQ3NyT2xKcURidEg1YThPdXM2aTNha1BlOVdEM0Q5NEdmbkhsbDdpQTdISHkvSklxcFQ4VUpROUhwYjh0Si90dGdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTAyMDY2CWZpbGU65rOl5rSeXzMuMC4wX3g2NC1zZXR1cC5leGUKcmEzMVAydXN4SzFEOHRMYnJLTHUyUWRwbUpZN1NWWDhkblE4dDFkZ1pSTk5MVDE2QWFvdjVIajVzVTE5ejdveDJVaXJIWEhGUmRULzRXZWhveEhDQkE9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_3.0.0_x64-setup.exe"
     }
   }
 }
