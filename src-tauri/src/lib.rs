@@ -17,6 +17,7 @@ mod public_ip;
 mod share;
 mod smart_mute;
 mod fetch;
+mod plugin;
 mod wlan;
 
 use client::{
@@ -1492,17 +1493,20 @@ async fn open_door(app: AppHandle, url: String, policy: String) -> Result<()> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err("链接不正确".into());
     }
-    let campus = tokio::task::spawn_blocking(crate::util::on_campus_net)
-        .await
-        .unwrap_or(false);
     let target = match policy.as_str() {
         "campus-only" => {
+            let campus = tokio::task::spawn_blocking(crate::util::on_campus_net)
+                .await
+                .unwrap_or(false);
             if !campus {
                 return Err("校园网网关只能在校园网里打开".into());
             }
             url
         }
         "intranet" => {
+            let campus = tokio::task::spawn_blocking(crate::util::on_campus_net)
+                .await
+                .unwrap_or(false);
             if campus {
                 url
             } else {
@@ -1881,6 +1885,8 @@ pub fn run() {
             app.manage(smart_mute::start(app.handle().clone()));
             app.manage(fetch::FetchHub::open(data_dir.clone()));
             fetch::spawn(app.handle().clone());
+            app.manage(plugin::PluginHub::open(data_dir.clone()));
+            plugin::spawn_ticker(app.handle().clone());
 
             if let Some(win) = app.get_webview_window("main") {
                 place_window(&win, &settings);
@@ -2089,7 +2095,28 @@ pub fn run() {
             fetch::fetch_status,
             fetch::fetch_arm,
             fetch::fetch_cancel,
-            fetch::fetch_resume
+            fetch::fetch_resume,
+            plugin::plugin_list,
+            plugin::plugin_install,
+            plugin::plugin_toggle,
+            plugin::plugin_uninstall,
+            plugin::plugin_load_html,
+            plugin::plugin_set_badge,
+            plugin::plugin_storage_get,
+            plugin::plugin_storage_set,
+            plugin::plugin_agenda_list,
+            plugin::plugin_agenda_upsert,
+            plugin::plugin_agenda_delete,
+            plugin::plugin_island_notify,
+            plugin::plugin_http_fetch,
+            plugin::plugin_get_cookies,
+            plugin::plugin_set_cookies,
+            plugin::plugin_open_auth_window,
+            plugin::plugin_mcp_list_tools,
+            plugin::plugin_mcp_call,
+            plugin::plugin_append_log,
+            plugin::plugin_open_log,
+            plugin::plugin_open_external
         ])
         .build(tauri::generate_context!())
         .expect("泥洞启动失败");

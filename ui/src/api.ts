@@ -48,6 +48,90 @@ export const api = {
     invoke<FetchStatus>("fetch_arm", { urls, time, dir, shutdown, useProxy }),
   fetchCancel: () => invoke<FetchStatus>("fetch_cancel"),
   fetchResume: () => invoke<FetchStatus>("fetch_resume"),
+  pluginList: () => invoke<PluginInfo[]>("plugin_list"),
+  pluginInstall: (path: string) => invoke<PluginInfo>("plugin_install", { path }),
+  pluginToggle: (pluginId: string, enabled: boolean) =>
+    invoke<PluginInfo[]>("plugin_toggle", { pluginId, enabled }),
+  pluginUninstall: (pluginId: string, removeAgenda: boolean) =>
+    invoke<PluginInfo[]>("plugin_uninstall", { pluginId, removeAgenda }),
+  pluginLoadHtml: (pluginId: string, theme: string) =>
+    invoke<string>("plugin_load_html", { pluginId, theme }),
+  pluginSetBadge: (pluginId: string, badge: string | null) =>
+    invoke<void>("plugin_set_badge", { pluginId, badge }),
+  pluginStorageGet: (pluginId: string, key: string) =>
+    invoke<unknown>("plugin_storage_get", { pluginId, key }),
+  pluginStorageSet: (pluginId: string, key: string, value: unknown) =>
+    invoke<void>("plugin_storage_set", { pluginId, key, value }),
+  pluginAgendaList: (pluginId: string) =>
+    invoke<Agenda[]>("plugin_agenda_list", { pluginId }),
+  pluginAgendaUpsert: (pluginId: string, item: Agenda) =>
+    invoke<Agenda[]>("plugin_agenda_upsert", { pluginId, item }),
+  pluginAgendaDelete: (pluginId: string, itemId: string) =>
+    invoke<Agenda[]>("plugin_agenda_delete", { pluginId, itemId }),
+  pluginIslandNotify: (pluginId: string, kind: "hint" | "remind", text: string, start?: string) =>
+    invoke<void>("plugin_island_notify", { pluginId, kind, text, start }),
+  pluginHttpFetch: (pluginId: string, req: PluginHttpRequest) =>
+    invoke<PluginHttpResponse>("plugin_http_fetch", { pluginId, req }),
+  pluginGetCookies: (pluginId: string) =>
+    invoke<Record<string, string>>("plugin_get_cookies", { pluginId }),
+  pluginSetCookies: (pluginId: string, cookies: unknown) =>
+    invoke<Record<string, string>>("plugin_set_cookies", { pluginId, cookies }),
+  pluginOpenAuthWindow: (
+    pluginId: string,
+    url: string,
+    username?: string,
+    password?: string
+  ) => invoke<void>("plugin_open_auth_window", { pluginId, url, username, password }),
+  pluginMcpListTools: (pluginId: string) =>
+    invoke<unknown>("plugin_mcp_list_tools", { pluginId }),
+  pluginMcpCall: (pluginId: string, tool: string, args: unknown) =>
+    invoke<unknown>("plugin_mcp_call", { pluginId, tool, arguments: args }),
+  pluginAppendLog: (pluginId: string, line: string) =>
+    invoke<void>("plugin_append_log", { pluginId, line }),
+  pluginOpenLog: (pluginId: string) =>
+    invoke<void>("plugin_open_log", { pluginId }),
+  pluginOpenExternal: (pluginId: string, url: string) =>
+    invoke<void>("plugin_open_external", { pluginId, url }),
+};
+
+export type McpConfig = {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+};
+
+export type PluginManifest = {
+  id: string;
+  name: string;
+  version: string;
+  author?: string;
+  description?: string;
+  runtime: "webview" | "mcp" | "hybrid" | string;
+  entry?: string | null;
+  background?: boolean;
+  permissions?: string[];
+  mcp?: McpConfig | null;
+};
+
+export type PluginInfo = {
+  manifest: PluginManifest;
+  enabled: boolean;
+  hasUi: boolean;
+  statusBadge?: string | null;
+};
+
+export type PluginHttpRequest = {
+  url: string;
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+};
+
+export type PluginHttpResponse = {
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+  cookies?: Record<string, string>;
 };
 
 export type ShareFile = { id?: number; path: string; name: string; bytes: number };

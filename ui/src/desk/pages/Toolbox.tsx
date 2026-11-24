@@ -1,11 +1,12 @@
 import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Dropdown, Field, Input, Option, Switch } from "@fluentui/react-components";
-import { ArrowDownload20Regular, Share20Regular, SpeakerMute20Regular, Wifi120Regular } from "@fluentui/react-icons";
+import { ArrowDownload20Regular, PlugConnected20Regular, Share20Regular, SpeakerMute20Regular, Wifi120Regular } from "@fluentui/react-icons";
 import { useEffect, useRef, useState } from "react";
-import { api } from "../../api";
+import { api, type PluginInfo } from "../../api";
 import { clampIdleMinutes } from "../../prefs";
 import type { AppSettings } from "../../types";
 import { Threshold } from "../../Threshold";
 import { FetchPanel } from "./Fetch";
+import { PluginManagerPanel, PluginView } from "./Plugins";
 import { SharePanel } from "./Share";
 
 const MODES: { value: NonNullable<AppSettings["campusWifiMode"]>; text: string }[] = [
@@ -28,9 +29,18 @@ function isCampusNet(name: string, configured: string) {
   return sameNet(name, configured) || CAMPUS_NETS.some((n) => sameNet(name, n));
 }
 
-export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSettings) => void; openShare?: number }) {
-  const { settings, setSettings, openShare } = props;
-  const [page, setPage] = useState<"hub" | "campus" | "share" | "mute" | "fetch">(openShare ? "share" : "hub");
+type ToolSubPage = "hub" | "campus" | "share" | "mute" | "fetch" | "plugins" | `plugin:${string}`;
+
+export function Toolbox(props: {
+  settings: AppSettings;
+  setSettings: (s: AppSettings) => void;
+  openShare?: number;
+  plugins: PluginInfo[];
+  theme: "light" | "dark";
+  onActivePlugin?: (id: string | null) => void;
+}) {
+  const { settings, setSettings, openShare, plugins, theme, onActivePlugin } = props;
+  const [page, setPage] = useState<ToolSubPage>(openShare ? "share" : "hub");
   const [motion, setMotion] = useState<"idle" | "back">("idle");
   const sharePanelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -43,10 +53,33 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
     void el.offsetWidth;
     el.classList.add("settings-sub-content");
   }, [openShare]);
-  const openPage = (next: "hub" | "campus" | "share" | "mute" | "fetch") => {
+  const openPage = (next: ToolSubPage) => {
     setMotion(next === "hub" && page !== "hub" ? "back" : "idle");
     setPage(next);
   };
+  useEffect(() => {
+    const activeId = page.startsWith("plugin:") ? page.slice("plugin:".length) : null;
+    onActivePlugin?.(activeId);
+    return () => {
+      onActivePlugin?.(null);
+    };
+  }, [page, onActivePlugin]);
+  const activePlugin = page.startsWith("plugin:")
+    ? plugins.find((p) => p.manifest.id === page.slice("plugin:".length))
+    : undefined;
+  const uiPlugins = plugins.filter((p) => p.enabled && p.hasUi);
+  const subTitle =
+    page === "campus"
+      ? "校园网自动登录"
+      : page === "share"
+        ? "免流文件分享"
+        : page === "mute"
+          ? "防社死设置"
+          : page === "fetch"
+            ? "定时下载"
+            : page === "plugins"
+              ? "插件管理"
+              : activePlugin?.manifest.name || "插件";
   const mode = settings.campusWifiMode || "off";
   const current = MODES.find((m) => m.value === mode) || MODES[0];
   const set = (patch: Partial<AppSettings>) => setSettings({ ...settings, ...patch });
@@ -78,12 +111,21 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
     <div className="stack">
       <div className="row-between">
         {page === "hub" ? (
-          <h1 className="page-title">工具箱</h1>
+          <>
+            <h1 className="page-title">工具箱</h1>
+            <Button
+              appearance="secondary"
+              icon={<PlugConnected20Regular />}
+              onClick={() => openPage("plugins")}
+            >
+              插件管理{plugins.length > 0 ? ` (${plugins.length})` : ""}
+            </Button>
+          </>
         ) : (
           <div className="settings-breadcrumb">
             <button type="button" className="settings-breadcrumb-link" onClick={() => openPage("hub")}>工具箱</button>
             <span aria-hidden="true">›</span>
-            <h1 className="page-title">{page === "campus" ? "校园网自动登录" : page === "share" ? "免流文件分享" : page === "mute" ? "防社死设置" : "定时下载"}</h1>
+            <h1 className="page-title">{subTitle}</h1>
           </div>
         )}
       </div>
@@ -105,6 +147,31 @@ export function Toolbox(props: { settings: AppSettings; setSettings: (s: AppSett
             <span className="tool-ico" aria-hidden="true"><ArrowDownload20Regular /></span>
             <span className="tool-name">定时下载</span>
           </button>
+          {uiPlugins.map((p) => (
+            <button
+              key={p.manifest.id}
+              type="button"
+              className="tool-tile on"
+              onClick={() => openPage(`plugin:${p.manifest.id}`)}
+            >
+              <span className="tool-ico" aria-hidden="true"><PlugConnected20Regular /></span>
+              <span className="tool-name">{p.manifest.name}</span>
+              {p.statusBadge ? <span className="tool-badge">{p.statusBadge}</span> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {page === "plugins" ? (
+        <div className="settings-sub-content">
+          <PluginManagerPanel
+            plugins={plugins}
+            onOpenPlugin={(id) => openPage(`plugin:${id}`)}
+          />
+        </div>
+      ) : null}
+      {page.startsWith("plugin:") ? (
+        <div className="settings-sub-content">
+          <PluginView pluginId={page.slice("plugin:".length)} theme={theme} />
         </div>
       ) : null}
       {page === "fetch" ? (

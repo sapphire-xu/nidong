@@ -264,7 +264,10 @@ fn active_class_key(
 
 fn active_agenda_key(items: &[AgendaItem], now: &DateTime<Local>) -> Option<String> {
     let naive_now = now.naive_local();
-    items.iter().find_map(|a| active_occurrence(a, naive_now))
+    items
+        .iter()
+        .filter(|a| !a.id.starts_with("plg:"))
+        .find_map(|a| active_occurrence(a, naive_now))
 }
 
 fn active_occurrence(a: &AgendaItem, now: NaiveDateTime) -> Option<String> {
@@ -570,5 +573,16 @@ mod tests {
         }));
         assert!(active_agenda_key(&[item.clone()], &at(2026, 10, 31, 1, 0)).is_some());
         assert!(active_agenda_key(&[item], &at(2026, 11, 1, 1, 0)).is_none());
+    }
+
+    #[test]
+    fn plugin_deadline_agenda_does_not_trigger_mute() {
+        let item = agenda(json!({
+            "id": "plg:edu.neu.plugin.mooc-monitor:hw_1001",
+            "name": "[MOOC截止] 高等数学 · 单元测验",
+            "start": "2026-10-31T21:00",
+            "end": "2026-10-31T21:30"
+        }));
+        assert!(active_agenda_key(&[item], &at(2026, 10, 31, 21, 15)).is_none());
     }
 }

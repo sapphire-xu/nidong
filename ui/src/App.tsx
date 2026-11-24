@@ -511,6 +511,18 @@ export default function App() {
       };
       startRemindRef.current({ ...sample, kind: "class" });
     }).then((f) => unsubs.push(f));
+    listen<{ name: string; start?: string; kind?: "class" | "event" }>("plugin-remind", (e) => {
+      const p = e.payload;
+      if (!p || !p.name) return;
+      startRemindRef.current({
+        name: p.name,
+        place: "",
+        start: p.start || "",
+        end: "",
+        weekday: 1,
+        kind: p.kind || "event",
+      });
+    }).then((f) => unsubs.push(f));
     return () => unsubs.forEach((f) => f());
   }, []);
 

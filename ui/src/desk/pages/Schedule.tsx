@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Popover, PopoverSurface, PopoverTrigger } from "@fluentui/react-components";
 import { Add20Regular } from "@fluentui/react-icons";
-import { agendasOnDate, repeatText, whenText } from "../../agenda";
+import { agendasOnDate, isDdlAgenda, repeatText, whenText } from "../../agenda";
 import { WEEKDAY_SHORT, addDays, cacheDayLabel, coursesOnDay, datesOfTeachingWeek, mondayOf } from "../../course";
 import { placeLabel, ymd } from "../../format";
 import type { Agenda, AppSettings, Snapshot } from "../../types";
@@ -11,6 +11,7 @@ import {
   AXIS_SPAN_MIN,
   AXIS_START_MIN,
   agendaDayMinutes,
+  clockMinutes,
   courseLane,
   layoutDay,
   sectionText,
@@ -47,6 +48,33 @@ export function Schedule(props: {
   const [calMonday, setCalMonday] = useState(() => mondayOf(now));
   const seeded = useRef(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const closeTimer = useRef<number | null>(null);
+
+  const openPop = (key: string) => {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+    setOpenKey(key);
+  };
+
+  const closePopSoon = (key: string) => {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+    }
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      setOpenKey((cur) => (cur === key ? null : cur));
+    }, 80);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (closeTimer.current !== null) {
+        window.clearTimeout(closeTimer.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (seeded.current || !day.weekNow) return;
@@ -124,7 +152,29 @@ export function Schedule(props: {
               const dow = i + 1;
               const courses = snap?.loggedIn && snap.semester && teaching ? coursesOnDay(snap.semester, semWeek, dow) : [];
               const items: LaneItem[] = courses.map((c) => courseLane(c));
+              const ddlPins: { key: string; min: number; top: number; events: Agenda[] }[] = [];
               for (const a of agendasOnDate(snap?.agenda, key)) {
+                if (isDdlAgenda(a)) {
+                  const endStamp = a.occEnd || a.end;
+                  if ((endStamp || "").slice(0, 10) !== key) continue;
+                  const rawMin = clockMinutes((endStamp || "").slice(11, 16));
+                  const clampedMin =
+                    rawMin < 0
+                      ? AXIS_END_MIN
+                      : Math.min(AXIS_END_MIN, Math.max(AXIS_START_MIN, rawMin));
+                  const hit = ddlPins.find((p) => Math.abs(p.min - clampedMin) <= 2);
+                  if (hit) {
+                    hit.events.push(a);
+                  } else {
+                    ddlPins.push({
+                      key: `ddl-${a.id}-${key}`,
+                      min: clampedMin,
+                      top: (clampedMin - AXIS_START_MIN) / AXIS_SPAN_MIN,
+                      events: [a],
+                    });
+                  }
+                  continue;
+                }
                 const span = agendaDayMinutes(a, key);
                 if (!span) continue;
                 items.push({
@@ -213,6 +263,35 @@ export function Schedule(props: {
                         </Popover>
                       );
                     })}
+                    {ddlPins.map((pin) => (
+                      <Popover
+                        key={pin.key}
+                        open={openKey === pin.key}
+                        onOpenChange={(_, data) => setOpenKey(data.open ? pin.key : null)}
+                        positioning={{ position: "above", offset: { mainAxis: 10 } }}
+                      >
+                        <PopoverTrigger disableButtonEnhancement>
+                          <button
+                            type="button"
+                            className="ddl-pointer"
+                            style={{ top: `${pin.top * 100}%` }}
+                            aria-label={pin.events.map((e) => e.name).join("、")}
+                            onMouseEnter={() => openPop(pin.key)}
+                            onMouseLeave={() => closePopSoon(pin.key)}
+                            onClick={() => pin.events[0] && props.onOpenEvent(pin.events[0])}
+                          >
+                            <i className="ddl-knob" aria-hidden="true" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverSurface className="ddl-pop-surface">
+                          <div className="ddl-pop-list">
+                            {pin.events.map((ev) => (
+                              <EventFacts key={ev.id} event={ev} />
+                            ))}
+                          </div>
+                        </PopoverSurface>
+                      </Popover>
+                    ))}
                   </div>
                   {layout.outside.length ? (
                     <div className="week-out">

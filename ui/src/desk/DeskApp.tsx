@@ -18,7 +18,7 @@ import {
   Settings20Regular,
   Toolbox20Regular,
 } from "@fluentui/react-icons";
-import { api } from "../api";
+import { api, type PluginInfo } from "../api";
 import { EventForm } from "../EventForm";
 import { cacheDayLabel } from "../course";
 import { resolveTheme, withSettingDefaults } from "../prefs";
@@ -31,6 +31,7 @@ import { Bills } from "./pages/Bills";
 import { Doors } from "./pages/Doors";
 import { Home } from "./pages/Home";
 import { Login, type Sms } from "./pages/Login";
+import { PluginBridge } from "./pages/Plugins";
 import { Schedule } from "./pages/Schedule";
 import { SettingsPage } from "./pages/Settings";
 import { Toolbox } from "./pages/Toolbox";
@@ -87,6 +88,8 @@ export function DeskApp() {
   const [updateHidden, setUpdateHidden] = useState(false);
   const [shareOn, setShareOn] = useState(false);
   const [shareJump, setShareJump] = useState(0);
+  const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [activePluginId, setActivePluginId] = useState<string | null>(null);
   pageRef.current = page;
 
   async function runLook(manual: boolean) {
@@ -239,6 +242,10 @@ export function DeskApp() {
     api.shareOffer().then((offer) => setShareOn(!!offer)).catch(() => undefined);
     listen<boolean>("share-changed", (e) => {
       setShareOn(!!e.payload);
+    }).then((f) => unsubs.push(f));
+    api.pluginList().then(setPlugins).catch(() => undefined);
+    listen<PluginInfo[]>("plugins-updated", (e) => {
+      setPlugins(e.payload || []);
     }).then((f) => unsubs.push(f));
     listen<LoginOutcome>("need-sms", (e) => {
       const out = e.payload;
@@ -456,7 +463,14 @@ export function DeskApp() {
                   />
                 )}
                 {page === "toolbox" && settings && (
-                  <Toolbox settings={settings} setSettings={updateSettings} openShare={shareJump} />
+                  <Toolbox
+                    settings={settings}
+                    setSettings={updateSettings}
+                    openShare={shareJump}
+                    plugins={plugins}
+                    theme={mode}
+                    onActivePlugin={setActivePluginId}
+                  />
                 )}
                 {page === "doors" && <Doors />}
                 {page === "bills" && (
@@ -559,6 +573,11 @@ export function DeskApp() {
           onClose={() => setEventOpen(false)}
           onSave={saveEvent}
           onDelete={editing?.id ? deleteEvent : undefined}
+        />
+        <PluginBridge
+          plugins={plugins}
+          theme={mode}
+          activePluginId={page === "toolbox" ? activePluginId : null}
         />
       </div>
     </FluentProvider>

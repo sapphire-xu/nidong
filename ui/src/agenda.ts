@@ -115,7 +115,16 @@ export function repeatText(a: Agenda | undefined): string {
   return [freq, detail, end].filter(Boolean).join(" ");
 }
 
+export function isDdlAgenda(a: Agenda | undefined): boolean {
+  if (!a) return false;
+  return (a.id || "").startsWith("plg:") || (a.name || "").startsWith("[MOOC") || (a.name || "").startsWith("[DDL");
+}
+
 export function whenText(a: Agenda): string {
+  if (isDdlAgenda(a)) {
+    const e = (a.occEnd || a.end).slice(11, 16);
+    return `${e} 截止`;
+  }
   const s = (a.occStart || a.start).slice(11, 16);
   const e = (a.occEnd || a.end).slice(11, 16);
   return `${s}–${e}`;
@@ -216,12 +225,13 @@ export function mixDay(courses: Course[], events: Agenda[], now: Date, day = now
     const start = parseAgenda(e.occStart || e.start);
     const end = parseAgenda(e.occEnd || e.end);
     if (!start || !end) continue;
+    const ddl = isDdlAgenda(e);
     raw.push({
       type: "event",
-      start,
+      start: ddl ? end : start,
       end,
-      displayStart: hmOf(e.occStart || e.start),
-      displayEnd: hmOf(e.occEnd || e.end),
+      displayStart: ddl ? `${hmOf(e.occEnd || e.end)} 截止` : hmOf(e.occStart || e.start),
+      displayEnd: ddl ? "" : hmOf(e.occEnd || e.end),
       name: e.name,
       meta: [repeatText(e), e.location, e.note].map((s) => (s || "").trim()).filter(Boolean).join(" · "),
       event: e,
@@ -233,16 +243,17 @@ export function mixDay(courses: Course[], events: Agenda[], now: Date, day = now
   return raw.map((r) => {
     let kind: CourseKind = "later";
     let label = "";
+    const ddl = isDdlAgenda(r.event);
     if (now >= r.end) {
       kind = "past";
-      label = "已结束";
-    } else if (now >= r.start) {
+      label = ddl ? "已截止" : "已结束";
+    } else if (!ddl && now >= r.start) {
       kind = "now";
       label = `还剩 ${minutesBetween(now, r.end)} 分钟`;
     } else if (next && next.key === r.key) {
       kind = "next";
       const m = minutesBetween(now, r.start);
-      label = r.type === "event" ? `即将开始 · ${m} 分钟` : `下一节 · ${m} 分钟`;
+      label = ddl ? `距截止 · ${m} 分钟` : r.type === "event" ? `即将开始 · ${m} 分钟` : `下一节 · ${m} 分钟`;
     }
     return {
       key: r.key,

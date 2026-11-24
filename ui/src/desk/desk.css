@@ -970,6 +970,12 @@ button.mix-row:focus-visible,
   display: grid;
   grid-template-columns: 52px repeat(7, minmax(96px, 1fr));
   min-width: 760px;
+  box-sizing: border-box;
+  padding-right: 10px;
+}
+.week-body {
+  padding-top: 10px;
+  padding-bottom: 14px;
 }
 .week-head { position: sticky; top: 0; z-index: 2; background: color-mix(in srgb, var(--colorNeutralBackground1) 92%, transparent); }
 .week-head div, .wh {
@@ -1069,6 +1075,67 @@ button.mix-row:focus-visible,
   background: #c45a12;
   z-index: 3;
   pointer-events: none;
+}
+.ddl-pointer {
+  position: absolute;
+  left: 0;
+  right: -6px;
+  height: 16px;
+  transform: translateY(-50%);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  z-index: 4;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+.ddl-pointer::before {
+  content: "";
+  display: block;
+  width: calc(100% - 6px);
+  height: 2px;
+  background: #d13438;
+  box-shadow: 0 0 2px rgba(209, 52, 56, 0.35);
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+.ddl-pointer:hover::before {
+  background: #b10e1c;
+  box-shadow: 0 0 4px rgba(209, 52, 56, 0.65);
+}
+.ddl-knob {
+  position: absolute;
+  right: 1px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #d13438;
+  box-shadow: 0 0 0 2px var(--colorNeutralBackground1);
+  transform: translateY(-50%);
+  pointer-events: none;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+.ddl-pointer:hover .ddl-knob {
+  background: #b10e1c;
+  box-shadow: 0 0 0 2px var(--colorNeutralBackground1), 0 0 0 4px rgba(209, 52, 56, 0.24);
+}
+[data-theme="dark"] .ddl-pointer::before,
+[data-theme="dark"] .ddl-knob {
+  background: #ff6b6b;
+}
+[data-theme="dark"] .ddl-pointer:hover::before,
+[data-theme="dark"] .ddl-pointer:hover .ddl-knob {
+  background: #ff8f8f;
+}
+.ddl-pop-surface {
+  pointer-events: none;
+}
+.ddl-pop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .block {
   position: absolute;
@@ -1211,3 +1278,122 @@ button.mix-row:focus-visible,
 }
 .sms-row { display: flex; gap: 8px; align-items: center; }
 .sms-row .fui-Input { flex: 1; }
+
+.tool-badge {
+  border-radius: 999px;
+  padding: 1px 8px;
+  background: #d5f4ec;
+  color: #0b3a82;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 560;
+}
+[data-theme="dark"] .tool-badge {
+  background: #8fd4c6;
+  color: #06231f;
+}
+.plugin-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.plugin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.plugin-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--colorNeutralStroke2);
+  background: var(--colorNeutralBackground1);
+}
+.plugin-card.on {
+  border-color: var(--colorBrandStroke2);
+}
+.plugin-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.plugin-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.plugin-icon {
+  display: grid;
+  place-items: center;
+  color: var(--colorBrandForeground1);
+}
+.plugin-name {
+  font-weight: 650;
+  font-size: 14px;
+}
+.plugin-ver {
+  font-size: 12px;
+  color: var(--colorNeutralForeground3);
+}
+.plugin-tag {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--colorNeutralStroke2);
+  color: var(--colorNeutralForeground3);
+}
+.plugin-badge-pill {
+  border-radius: 999px;
+  padding: 1px 8px;
+  background: #d5f4ec;
+  color: #0b3a82;
+  font-size: 11px;
+  font-weight: 560;
+}
+[data-theme="dark"] .plugin-badge-pill {
+  background: #8fd4c6;
+  color: #06231f;
+}
+.plugin-card-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.plugin-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 12px;
+  color: var(--colorNeutralForeground3);
+}
+.plugin-frame-wrap {
+  width: 100%;
+  height: calc(100vh - 120px);
+  min-height: 440px;
+  border-radius: 8px;
+  border: 1px solid var(--colorNeutralStroke2);
+  overflow: hidden;
+  background: var(--colorNeutralBackground1);
+}
+.plugin-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+.plugin-mcp-pre {
+  margin: 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--colorNeutralBackground3);
+  font-size: 12px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

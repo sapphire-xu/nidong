@@ -1,6 +1,6 @@
 # 泥洞 · 给后续 AI / 实现者
 
-读这份再改代码。学校接口细节只在 [开发文档.md](开发文档.md)；颜色、尺寸、文案气质只在 [视觉设计.md](视觉设计.md)。不要把那两份再抄一遍到这里。
+读这份再改代码。学校接口细节只在 [开发文档.md](开发文档.md)；颜色、尺寸、文案气质只在 [视觉设计.md](视觉设计.md)；插件底座和插件规范只在 [插件说明.md](插件说明.md)。不要把那几份再抄一遍到这里。
 
 和代码冲突时，以代码和本文为准。[prototype/](prototype/index.html) 是旧的展开岛，不要当现行规格。界面改造计划已删。
 
@@ -52,7 +52,8 @@ nidong/
       pages/Settings.tsx   设置页外壳，内容转给 SettingsPanel
       pages/Doors.tsx      任意门
       pages/Home.tsx       主页
-      pages/Toolbox.tsx    工具箱。校园网自动登录、免流文件分享、防社死设置、定时下载
+      pages/Toolbox.tsx    工具箱。校园网自动登录、免流文件分享、防社死设置、定时下载、插件管理与已启用 UI 插件入口
+      pages/Plugins.tsx    插件管理页、前台 PluginView、顶层通信桥与后台常驻容器 PluginBridge
       pages/Share.tsx      免流文件分享：本机网页、口令、拖放和添加文件
       pages/Fetch.tsx      定时下载：链接、时刻、文件夹、下完关机、系统代理
       pages/NetPanel.tsx   网费页：计费规则、本机流量记录
@@ -72,6 +73,7 @@ nidong/
     meter_cmd.rs     网费页开关本机流量记录。计数在 src-tauri/meter
     smart_mute.rs    防社死 · 智能静音。默认输出静音、无音频计时、课程/日程时间段
     fetch.rs         定时下载。到点拉取 http(s)，断点续传，可选下完关机
+    plugin.rs        插件宿主（WebView 沙箱桥接、私有存储/Cookie、HTTP 代理、独立认证窗、MCP Stdio）
     ipgw.rs          网关登录。单独客户端，不打开浏览器
     client.rs        CAS / 卡 / 网 / 电 / 账单
     course.rs        教务 JSON → SemesterTable，以及该不该打教务
@@ -83,7 +85,7 @@ nidong/
     periods.rs       南湖/浑南作息
     util.rs / webvpn.rs
   src-tauri/meter/   提权的 nidong-meter.exe：采样、账本、计划任务
-  docs/              开发文档、视觉设计、本文、prototype
+  docs/              开发文档、视觉设计、插件说明、本文、prototype
   scripts/           set-now.bat / clear-now.bat 测时钟；release.bat 打带签名的安装包
   updates/latest.example.json   更新清单示例。不要改名成 latest.json 拿去当线上文件
 ```
@@ -220,6 +222,7 @@ nidong/
 | 网费计费说明、本机流量记录 | `ui/src/desk/pages/NetPanel.tsx`。0:00–6:00 不计费是这段文案，和电费夜里缓存不是一回事。记录进程在 `src-tauri/meter` |
 | 防社死 · 智能静音 | 页面 `ui/src/desk/pages/Toolbox.tsx`，看护 `src-tauri/src/smart_mute.rs`，字段在 `models.rs` / `types.ts` |
 | 定时下载 | 页面 `ui/src/desk/pages/Fetch.tsx`，任务在 `src-tauri/src/fetch.rs`。状态在 `fetch.json`，不要塞进 `AppSettings` |
+| 插件底座与插件管理 | 宿主 `src-tauri/src/plugin.rs`，桥接与管理页 `ui/src/desk/pages/Plugins.tsx`，入口在 `Toolbox.tsx`。详见 [插件说明.md](插件说明.md) |
 | 教务课表解析、每天打一次 | `src-tauri/src/course.rs`（规则见下） |
 | 托盘、`open_desk`、刷新编排 | `src-tauri/src/lib.rs` |
 | 岛的颜色和圆角 | `ui/src/styles.css` |
@@ -283,6 +286,8 @@ nidong/
 - 不要在智能静音关闭时动系统静音，不要改音量，也不要在用户手动取消静音后立刻又静音
 - 不要发现新版本就自动下载。下载只发生在用户点「更新并重启」之后
 - 不要在过了 6 点后自动续传预定在 0:00–6:00 的定时下载。用户点「仍然继续」才可以在计费时段接着下
+- 不要把第三方插件代码放进泥洞本体仓库；插件统一装在 `%APPDATA%\edu.neu.nidong\plugins\`
+- 不要给插件 iframe 开 `allow-same-origin`，也不要向插件暴露泥洞一号通密码、主会话 Cookie 或 `window.__TAURI__`；所有插件能力必须走 `PluginBridge` 并在 Rust 侧校验启停和权限
 
 ## 托盘
 
@@ -305,7 +310,7 @@ nidong/
 看护在 `src-tauri/src/smart_mute.rs` 的独立线程里，约每秒一次：
 
 - 用 WASAPI 打开**系统默认输出设备**，只 `SetMute`，不改音量。峰值高于约 -66 dBFS 算有音频。
-- 课程用 snapshot 里的 `semester` + 设置里的第一周周一算教学周，再取当天课程；日程用 snapshot 里的 `agenda`，重复按 `agenda.ts` 同一套规则展开（每天、按星期、按次数/结束日；跨天重复退化成单段）。
+- 课程用 snapshot 里的 `semester` + 设置里的第一周周一算教学周，再取当天课程；日程用 snapshot 里的 `agenda`，重复按 `agenda.ts` 同一套规则展开（每天、按星期、按次数/结束日；跨天重复退化成单段）。插件写入的日程（ID 以 `plg:` 开头）视为 DDL 截止点，不触发日程自动静音。
 - 进入时间段就静音，离开时间段恢复进入前的静音状态。手动取消静音后，本段课程/日程、或这一次无音频静音不再动手，不去和用户抢静音键。无音频计时从手动取消时重算。
 - 设置全关或退出泥洞时，如果静音是泥洞加上的，恢复原状。退出最多等 1.5 秒；进程被强杀时恢复不了。
 - 非 Windows 构建没有静音实现，只有纯逻辑测试。
@@ -344,9 +349,20 @@ nidong/
 
 页面上断电和 Steam 收成一行：「夜间断电？想要Steam定时下载？点击 了解更多」。弹窗标题「了解更多」，三段：断电停在已落盘进度、过了 6 点不自动续；Steam 用自己的下载时段且不能下完关机；系统代理走 Windows 当前代理，TUN / WARP 开不开这项效果一样。页底一行：「请在下载时段保持电脑与泥洞开启」。电脑已经关机时，泥洞不能把它唤醒。Steam 的游戏不从这里下，也不要去改 Steam 的配置。
 
+## 插件
+
+底座在 `src-tauri/src/plugin.rs`，桥接与管理页在 `ui/src/desk/pages/Plugins.tsx`，入口在工具箱右上角「插件管理」；已启用的 UI 插件会作为瓷贴直接出现在工具箱网格中。没登录泥洞也能用。
+
+插件独立装在 `%APPDATA%\edu.neu.nidong\plugins\<plugin-id>\`，启停记录在 `plugins\registry.json`，与本体仓库隔离。支持 `.zip`、`.ndplugin`（单文件 JSON 包）或含 `plugin.json` 的文件夹安装，支持 **WebView**、**MCP Stdio** 与 **hybrid** 三种形态。
+
+- WebView 插件通过 `srcDoc` 跑在沙箱 `iframe`（前台 `allow-scripts allow-forms`，后台 `allow-scripts`），宿主注入主题变量与 `window.nidong` SDK，走 `postMessage` ↔ `PluginBridge` ↔ Rust 命令。权限（`agenda:write`、`island:notify`、`http:<host>`）必须在 Rust 侧校验。
+- 开启 `background: true` 的 UI 插件由挂在 `DeskApp` 顶层的 `PluginBridge` 保持隐藏运行（`desk` 窗口配置了 `backgroundThrottling: "disabled"`），Rust 每 60 秒广播 `plugin-tick`（走 `clock::now()`）。打开/关闭插件前台面板时会互斥重建前后台 `iframe`，状态须落在 `storage.json`。
+- 插件写入的日程 ID 强制带 `plg:<plugin-id>:` 前缀，在周视图画成按 `end` 定位的红色 DDL 指针，主页按截止时间排序，不触发智能静音，卸载插件时可选一并清除。悬浮岛通知复用 `campus-hint` 与 `plugin-remind`。
+- 完整清单字段、桥接 API、主题变量、MCP Stdio 协议、最小示例及现行边界见 [插件说明.md](插件说明.md)。
+
 ## 关于
 
-关于页只有一句产品说明、作者 `sapphire_fic`、反馈邮箱 `xufeiyang@mails.neu.edu.cn`（`open_feedback` 打开 mailto），以及下方的版本和检查更新。版本用 `getVersion()`，读正在运行的程序，来自 `tauri.conf.json`。不要在页面里写死。不要把 Fluent / WinUIonWeb 那句写回关于页，它在 README。
+关于页只有一句产品说明、作者 `sapphire_fic`、官网 `https://nidong.sapphirefic.tech/`（`open_door(..., "direct")` 打开）、反馈邮箱 `xufeiyang@mails.neu.edu.cn`（`open_feedback` 打开 mailto），以及下方的版本和检查更新。版本用 `getVersion()`，读正在运行的程序，来自 `tauri.conf.json`。不要在页面里写死。不要把 Fluent / WinUIonWeb 那句写回关于页，它在 README。
 
 ## 验证
 

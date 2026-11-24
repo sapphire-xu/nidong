@@ -50,6 +50,16 @@ export function About(props: {
       <dl className="about-meta">
         <dt>作者</dt>
         <dd>sapphire_fic</dd>
+        <dt>官网</dt>
+        <dd>
+          <button
+            type="button"
+            className="about-mail"
+            onClick={() => { void api.openDoor("https://nidong.sapphirefic.tech/", "direct").catch(() => undefined); }}
+          >
+            https://nidong.sapphirefic.tech/
+          </button>
+        </dd>
         <dt>反馈</dt>
         <dd>
           <button type="button" className="about-mail" onClick={() => { void api.openFeedback().catch(() => undefined); }}>
