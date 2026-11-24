@@ -1366,8 +1366,10 @@ pub async fn plugin_open_auth_window(
     ))
     .unwrap_or_else(|_| parsed_url.clone());
 
-    if let Some(existing) = app.get_webview_window("plugin-auth") {
-        let _ = existing.close();
+    for (lbl, existing) in app.webview_windows() {
+        if lbl == "plugin-auth" || lbl.starts_with("plugin-auth-") {
+            let _ = existing.close();
+        }
     }
 
     let user_str = username.unwrap_or_default();
@@ -1380,10 +1382,19 @@ pub async fn plugin_open_auth_window(
     let pid_for_title = plugin_id.clone();
     let dir_for_title = plugins_dir.clone();
 
-    let win = WebviewWindowBuilder::new(&app, "plugin-auth", WebviewUrl::External(parsed_url))
+    let auth_label = format!(
+        "plugin-auth-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    );
+
+    let win = WebviewWindowBuilder::new(&app, auth_label, WebviewUrl::External(parsed_url))
         .title(format!("登录 {} - 泥洞插件认证", manifest.name))
         .inner_size(980.0, 680.0)
         .center()
+        .visible(true)
         .focused(true)
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
         .initialization_script_for_all_frames(&script)
@@ -1695,5 +1706,29 @@ mod tests {
         assert_eq!(id1, "plg:mooc:hw_101");
         let id2 = make_plugin_agenda_id("mooc", "plg:mooc:hw_101");
         assert_eq!(id2, "plg:mooc:hw_101");
+    }
+
+    #[test]
+    fn tauri_conf_allows_plugin_srcdoc_inline_scripts() {
+        let conf_str = include_str!("../tauri.conf.json");
+        let conf: Value = serde_json::from_str(conf_str).expect("valid tauri.conf.json");
+        let sec = &conf["app"]["security"];
+        let csp = sec["csp"].as_str().unwrap_or("");
+        assert!(csp.contains("script-src") && csp.contains("'unsafe-inline'"));
+        assert!(csp.contains("style-src") && csp.contains("'unsafe-inline'"));
+        let disabled = &sec["dangerousDisableAssetCspModification"];
+        let ok = disabled.as_bool() == Some(true)
+            || disabled
+                .as_array()
+                .map(|arr| {
+                    let has_script = arr.iter().any(|v| v.as_str() == Some("script-src"));
+                    let has_style = arr.iter().any(|v| v.as_str() == Some("style-src"));
+                    has_script && has_style
+                })
+                .unwrap_or(false);
+        assert!(
+            ok,
+            "tauri.conf.json must disable asset CSP hash injection for script-src/style-src so plugin srcDoc inline scripts work in release builds"
+        );
     }
 }
