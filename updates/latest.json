@@ -1,11 +1,11 @@
 {
-  "version": "3.0.0",
-  "notes": "新增独立插件兼容底座（支持 WebView / MCP 插件的安装、启停、沙箱隔离、独立 Cookie 与后台常驻）；日程周视图支持指针式 DDL 渲染；补充插件开发规范文档并更新关于页。",
-  "pub_date": "2026-11-24T06:34:27Z",
+  "version": "3.0.1",
+  "notes": "修复 3.0.0 正式版因 CSP 自动追加哈希导致插件页面内联脚本被拦截、按钮与后台巡检无响应的问题；加固插件独立认证窗口重复打开的稳定性。",
+  "pub_date": "2026-11-24T07:04:31Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDlvb2ZSS2c1VUFzYUNDVVAyL29zQ3NyT2xKcURidEg1YThPdXM2aTNha1BlOVdEM0Q5NEdmbkhsbDdpQTdISHkvSklxcFQ4VUpROUhwYjh0Si90dGdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTAyMDY2CWZpbGU65rOl5rSeXzMuMC4wX3g2NC1zZXR1cC5leGUKcmEzMVAydXN4SzFEOHRMYnJLTHUyUWRwbUpZN1NWWDhkblE4dDFkZ1pSTk5MVDE2QWFvdjVIajVzVTE5ejdveDJVaXJIWEhGUmRULzRXZWhveEhDQkE9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_3.0.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDFCWExrL2haTm0xeW44em5TQ29Yb0RvVWU4Z0pQcWM0bGRSanh3L2NsMlFsNmhCdGFhNlZJdzZkNUVBZVJoaXY1bmJwaEpBcmMrSGdFdzZQcDBNYWdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTAzODcxCWZpbGU65rOl5rSeXzMuMC4xX3g2NC1zZXR1cC5leGUKY1kva3R5NXMxa25ycURlOXhSeloxdDJiWHpjWGdOZytWYXd5aXBOMGtiNVkrZ3F5cjBkZ1lmS0JiZnhBWFpsQVJUcTltRDBZVjdQdTBtalh5Z2QvQVE9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_3.0.1_x64-setup.exe"
     }
   }
 }
