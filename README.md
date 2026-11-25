@@ -31,18 +31,19 @@
 - **任意门**：聚合常用校内官方站点与实用校外资源；校内站点在校园网直连、校外自动转 WebVPN，校园网网关仅在校园网内打开。
 - **离线与跳过登录**：断网且上次未退出登录时直接进入主页并显示本地缓存（「离线状态」）；未登录也可点击「跳过登录」，照常使用日程、工具箱、任意门与插件。
 - **校内 / 校外自适应**：校园网直连一卡通与教务，校外自动经学校 WebVPN 获取同一套数据。
-- **本机凭据与单实例**：一号通密码存入 Windows 凭据管理器，关闭「记住密码」即刻清除；程序已在运行时再次启动会自动唤出悬浮岛并前置主窗口。
+- **本机凭据与单实例**：一号通密码存入系统凭据管理器（Windows 凭据管理器 / Linux Secret Service），关闭「记住密码」即刻清除；程序已在运行时再次启动会自动唤出悬浮岛并前置主窗口。
 
-不做充值、缴费下单、挂失、选课。窗口包含 **主页、日程、账单、工具箱、任意门、设置、关于** 七项导航，点击关闭仅隐藏窗口，程序在托盘继续运行。
+不做充值、缴费下单、挂失、选课。窗口包含 **主页、日程、账单、工具箱、任意门、设置、关于** 七项导航，左侧导航栏支持收起为仅图标模式、拖拽调整顺序，以及从工具箱将常用工具或 UI 插件固定到侧边栏快捷进入；点击关闭仅隐藏窗口，程序在托盘继续运行。
 
-## 安装（Windows）
+## 安装（Windows / Linux）
 
-需要 64 位 Windows。
+支持 **64 位 Windows** 与 **64 位 Linux（x86_64，兼容 X11 / Wayland）**。
 
-- **新安装**：前往官网 [nidong.sapphirefic.tech](https://nidong.sapphirefic.tech/)、[GitHub Releases](https://github.com/sapphire-xu/nidong/releases/latest) 或仓库 `updates/` 目录下载最新安装包（Gitee 镜像仓库同样同步发布）。安装完成后开始菜单名称为「泥洞」。
-- **应用内更新**：已安装 v2.0.1 及以上版本时，打开窗口会自动静默检查更新，确认点击「更新并重启」后才会下载安装。
+- **Windows 安装**：前往官网 [nidong.sapphirefic.tech](https://nidong.sapphirefic.tech/)、[GitHub Releases](https://github.com/sapphire-xu/nidong/releases/latest) 或仓库 `updates/` 目录下载最新 `nidong_<版本>_x64-setup.exe`（Gitee 镜像仓库同样同步发布）。安装完成后开始菜单名称为「泥洞」。
+- **Windows 应用内更新**：已安装 v2.0.1 及以上版本时，打开窗口会自动静默检查更新，确认点击「更新并重启」后才会下载安装。
+- **Linux 安装（`.deb` / `.AppImage`）**：前往 [GitHub Releases](https://github.com/sapphire-xu/nidong/releases/latest) 下载 `nidong_<版本>_amd64.deb`（Debian / Ubuntu 可执行 `sudo apt install ./nidong_<版本>_amd64.deb`）或免安装的 `nidong_<版本>_amd64.AppImage`（`chmod +x` 后运行）。Linux 版本支持核心看板、课表日程、插件底座、校园网自动登录（`nmcli`/`iw`）、免流文件分享、智能静音（PipeWire/PulseAudio）、定时下载与系统托盘/桌面通知；Wayland 环境下可在设置中关闭悬浮岛改用托盘与系统通知，暂不含 Windows 专属的本机 ETW 流量监控与自动更新。详见 [Linux 适配与构建说明](docs/Linux适配说明.md)。
 
-> 暂未支持 macOS / Linux，若愿意提供测试环境欢迎联系作者，不胜感激。
+> 暂未支持 macOS，若愿意提供测试环境欢迎联系作者，不胜感激。
 
 ## 使用小贴士
 
@@ -67,7 +68,7 @@
 
 ## 从源码开发
 
-环境要求：Node.js 18+、Rust stable、Windows C++ Build Tools。
+环境要求：Node.js 18+、Rust stable；Windows 需安装 C++ Build Tools，Linux 需安装 WebKitGTK 4.1 / GTK3 / Ayatana AppIndicator 等开发依赖（见 [docs/Linux适配说明.md](docs/Linux适配说明.md)）。
 
 ```bash
 git clone https://github.com/sapphire-xu/nidong.git
@@ -76,18 +77,20 @@ npm install
 npm start
 ```
 
-也可直接双击仓库根目录的 `启动.bat` 启动开发模式。
+Windows 下也可直接双击仓库根目录的 `启动.bat` 启动开发模式；Linux 本地打包 `.deb` 与 `.AppImage` 可运行 `./scripts/build-linux.sh`。
 
-- **打包发布**：运行 `scripts\publish.bat -Version x.y.z -Notes "更新说明"` 自动改版本号、使用 `%USERPROFILE%\.tauri\nidong.key`（空口令）签名打包、输出到 `updates/nidong_<版本>_x64-setup.exe` 并更新 `updates/latest.json` 后推送至 Gitee（私钥切勿提交或上传）。仅本地打包不推送请运行 `scripts\release.bat`。
+- **自动化双平台构建**：推送 `v*.*.*` 标签到 GitHub 会触发 [.github/workflows/release.yml](.github/workflows/release.yml)，自动在云端并行完成 Windows（NSIS + `nidong-meter`）与 Linux（`.deb` + `.AppImage`）测试、签名打包并创建 Draft Release。
+- **Gitee 应用内更新发布**：Windows 本地打包并同步 `updates/latest.json` 可运行 `scripts\publish.bat -Version x.y.z -Notes "更新说明"`（私钥 `%USERPROFILE%\.tauri\nidong.key` 切勿提交或上传）。仅本地打包不推送请运行 `scripts\release.bat`。
 - **调试时钟**：测试上课提醒或定时逻辑可用 `scripts\set-now.bat` 覆盖程序时间，测完运行 `scripts\clear-now.bat` 恢复，详见 [docs/给AI.md](docs/给AI.md)。
 
 ## 文档导航
 
-修改本体功能建议先读 [docs/给AI.md](docs/给AI.md)；抓取学校数据须遵循 [docs/开发文档.md](docs/开发文档.md) 中的实测接口；界面设计以 [docs/视觉设计.md](docs/视觉设计.md) 为准；开发或适配插件请参阅 [docs/插件说明.md](docs/插件说明.md)。文档与代码冲突时，以代码和 `给AI.md` 为准。
+修改本体功能建议先读 [docs/给AI.md](docs/给AI.md)；抓取学校数据须遵循 [docs/开发文档.md](docs/开发文档.md) 中的实测接口；界面设计以 [docs/视觉设计.md](docs/视觉设计.md) 为准；开发或适配插件请参阅 [docs/插件说明.md](docs/插件说明.md)；Linux 构建与平台差异请参阅 [docs/Linux适配说明.md](docs/Linux适配说明.md)。文档与代码冲突时，以代码和 `给AI.md` 为准。
 
 | 文档 | 面向读者 | 内容摘要 |
 |---|---|---|
 | [docs/给AI.md](docs/给AI.md) | 后续 AI / 维护者 | 现行架构、窗口状态机、各模块位置与修改约束 |
+| [docs/Linux适配说明.md](docs/Linux适配说明.md) | Linux 用户 / 维护者 | Linux 平台依赖、打包流程、X11/Wayland 差异与功能对照 |
 | [docs/插件说明.md](docs/插件说明.md) | 插件开发者 / 宿主维护者 | 插件底座架构、打包与 `plugin.json` 规范、权限、`window.nidong` SDK 与 MCP Stdio 规范 |
 | [docs/视觉设计.md](docs/视觉设计.md) | 视觉 / 前端样式 | 品牌气质、色彩 Token、尺寸规范、状态表现与禁止项 |
 | [docs/开发文档.md](docs/开发文档.md) | 抓数与认证维护 | 已实测的东大各业务接口、认证流程与缓存策略 |

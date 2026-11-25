@@ -1,11 +1,11 @@
 {
-  "version": "3.0.1",
-  "notes": "修复 3.0.0 正式版因 CSP 自动追加哈希导致插件页面内联脚本被拦截、按钮与后台巡检无响应的问题；加固插件独立认证窗口重复打开的稳定性。",
-  "pub_date": "2026-11-24T07:04:31Z",
+  "version": "3.1.0",
+  "notes": "新增完整 Linux 桌面支持（.deb 与 .AppImage）；左侧导航栏支持收起为仅图标模式、拖拽调整顺序及从工具箱固定常用工具/插件快捷进入；新增 GitHub Actions 双平台自动构建发布流程。",
+  "pub_date": "2026-11-25T03:57:02Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZDFCWExrL2haTm0xeW44em5TQ29Yb0RvVWU4Z0pQcWM0bGRSanh3L2NsMlFsNmhCdGFhNlZJdzZkNUVBZVJoaXY1bmJwaEpBcmMrSGdFdzZQcDBNYWdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTAzODcxCWZpbGU65rOl5rSeXzMuMC4xX3g2NC1zZXR1cC5leGUKY1kva3R5NXMxa25ycURlOXhSeloxdDJiWHpjWGdOZytWYXd5aXBOMGtiNVkrZ3F5cjBkZ1lmS0JiZnhBWFpsQVJUcTltRDBZVjdQdTBtalh5Z2QvQVE9PQo=",
-      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_3.0.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSUi9jU1FyaUcxZC84blFEeCttWEErdzhvQmRwY0s0M1Eva1Raa2RKMEpaTjBlVHN4M3B6VzdnZ0R0TERRY3VaeFRicUtZUXc4bWJ5SE5XR3FzVFVUWGhEb3BZSmZmZVFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTc4NTMyCWZpbGU65rOl5rSeXzMuMS4wX3g2NC1zZXR1cC5leGUKbHRhWkZXQVFLR3NkR25SbFJHRWEvRmszK3pza1V5bnBENTB4cmJwdFZGQXprU2JlZk0vMVJ4bUUzNzN0VHJGLzBwbXhGRGJZZDhlM2h5TG1ZQURWRHc9PQo=",
+      "url": "https://gitee.com/sapphire_fic/nidong/raw/master/updates/nidong_3.1.0_x64-setup.exe"
     }
   }
 }
