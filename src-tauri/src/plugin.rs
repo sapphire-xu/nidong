@@ -385,7 +385,7 @@ pub fn install_plugin_from_path(plugins_dir: &Path, source: &Path) -> Result<Plu
         return Err("无法解析该插件清单或 .ndplugin 包".into());
     }
 
-    // 2. 支持 .zip 压缩包（使用系统内置 tar 或 PowerShell 解压到临时目录）
+    // 2. 支持 .zip 压缩包（纯 Rust 解压，跨平台且阻止路径穿越）
     if ext == "zip" {
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -393,29 +393,9 @@ pub fn install_plugin_from_path(plugins_dir: &Path, source: &Path) -> Result<Plu
             .unwrap_or(0);
         let tmp_dir = plugins_dir.join(format!(".tmp_extract_{ts}"));
         fs::create_dir_all(&tmp_dir)?;
-        let tar_status = Command::new("tar")
-            .arg("-xf")
-            .arg(source)
-            .arg("-C")
-            .arg(&tmp_dir)
-            .status();
-        let extracted = match tar_status {
-            Ok(st) if st.success() => true,
-            _ => {
-                let ps = Command::new("powershell")
-                    .args(["-NoProfile", "-Command"])
-                    .arg(format!(
-                        "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
-                        source.display(),
-                        tmp_dir.display()
-                    ))
-                    .status();
-                matches!(ps, Ok(st) if st.success())
-            }
-        };
-        if !extracted {
+        if let Err(err) = extract_zip_archive(source, &tmp_dir) {
             let _ = fs::remove_dir_all(&tmp_dir);
-            return Err("解压 .zip 插件包失败".into());
+            return Err(err);
         }
         let res = install_from_dir(plugins_dir, &tmp_dir);
         let _ = fs::remove_dir_all(&tmp_dir);
@@ -423,6 +403,34 @@ pub fn install_plugin_from_path(plugins_dir: &Path, source: &Path) -> Result<Plu
     }
 
     Err("只支持安装 .zip、.ndplugin 插件包或包含 plugin.json 的文件夹".into())
+}
+
+fn extract_zip_archive(source: &Path, dst_dir: &Path) -> Result<()> {
+    let file = fs::File::open(source).map_err(|_| "无法打开 .zip 插件包")?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|_| "解压 .zip 插件包失败：文件不是有效的 ZIP")?;
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|_| "解压 .zip 插件包失败")?;
+        let Some(rel) = entry.enclosed_name().map(|p| p.to_path_buf()) else {
+            return Err("插件压缩包包含非法路径".into());
+        };
+        if entry.is_symlink() {
+            continue;
+        }
+        let out_path = dst_dir.join(rel);
+        if entry.is_dir() {
+            fs::create_dir_all(&out_path)?;
+        } else {
+            if let Some(parent) = out_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let mut out_file = fs::File::create(&out_path)?;
+            std::io::copy(&mut entry, &mut out_file)?;
+        }
+    }
+    Ok(())
 }
 
 const BRIDGE_SCRIPT_TEMPLATE: &str = r#"
@@ -462,7 +470,7 @@ const BRIDGE_SCRIPT_TEMPLATE: &str = r#"
     color-scheme: dark;
   }
   body {
-    font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+    font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei", system-ui, sans-serif;
     color: var(--ink);
     background: transparent;
     margin: 0;
@@ -673,6 +681,11 @@ pub fn cookies_set_in(
     }
     let p = dir.join("cookies.json");
     fs::write(&p, serde_json::to_vec_pretty(cookies).unwrap_or_default())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&p, fs::Permissions::from_mode(0o600));
+    }
     Ok(())
 }
 
@@ -727,6 +740,39 @@ fn run_mcp_stdio(mcp: &McpConfig, method: &str, params: Value) -> Result<Value> 
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        if !mcp.env.contains_key("PATH") {
+            let current = std::env::var("PATH").unwrap_or_default();
+            let mut extra = Vec::new();
+            if let Ok(home) = std::env::var("HOME") {
+                for rel in [".local/bin", ".cargo/bin", ".npm-global/bin"] {
+                    let p = Path::new(&home).join(rel);
+                    if p.is_dir() {
+                        extra.push(p.to_string_lossy().into_owned());
+                    }
+                }
+            }
+            for sys in ["/usr/local/bin", "/usr/bin", "/bin"] {
+                if Path::new(sys).is_dir() {
+                    extra.push(sys.to_string());
+                }
+            }
+            let mut parts: Vec<String> = current
+                .split(':')
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+            for p in extra {
+                if !parts.iter().any(|x| x == &p) {
+                    parts.push(p);
+                }
+            }
+            if !parts.is_empty() {
+                cmd.env("PATH", parts.join(":"));
+            }
+        }
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -1422,11 +1468,14 @@ pub async fn plugin_open_auth_window(
             std::thread::spawn(move || {
                 // 启动一个唤醒辅助线程，40ms 后向主线程窗口投递一次标题更新消息，
                 // 防止 webview2_com::wait_with_pump 在 GetCookies 回调后停留在 GetMessageA
-                let w_kick = w.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(Duration::from_millis(45));
-                    let _ = w_kick.set_title("登录成功 - 泥洞插件认证");
-                });
+                #[cfg(windows)]
+                {
+                    let w_kick = w.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(45));
+                        let _ = w_kick.set_title("登录成功 - 泥洞插件认证");
+                    });
+                }
                 if let Ok(ck_list) = w.cookies_for_url(origin_inner) {
                     for c in ck_list {
                         let k = c.name().trim().to_string();
@@ -1706,6 +1755,41 @@ mod tests {
         assert_eq!(id1, "plg:mooc:hw_101");
         let id2 = make_plugin_agenda_id("mooc", "plg:mooc:hw_101");
         assert_eq!(id2, "plg:mooc:hw_101");
+    }
+
+    #[test]
+    fn installs_plugin_from_zip_without_external_tools() {
+        let tmp = std::env::temp_dir().join(format!(
+            "nidong_plugin_zip_test_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let plugins_dir = tmp.join("plugins");
+        fs::create_dir_all(&plugins_dir).unwrap();
+        let zip_path = tmp.join("demo.zip");
+        {
+            let file = fs::File::create(&zip_path).unwrap();
+            let mut writer = zip::ZipWriter::new(file);
+            let opts = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            writer.start_file("demo/plugin.json", opts).unwrap();
+            writer
+                .write_all(&serde_json::to_vec(&sample_manifest()).unwrap())
+                .unwrap();
+            writer.start_file("demo/ui/index.html", opts).unwrap();
+            writer
+                .write_all(b"<!doctype html><html><head></head><body>ok</body></html>")
+                .unwrap();
+            writer.finish().unwrap();
+        }
+        let manifest = install_plugin_from_path(&plugins_dir, &zip_path).unwrap();
+        assert_eq!(manifest.id, "edu.neu.plugin.mooc-monitor");
+        assert!(plugins_dir
+            .join("edu.neu.plugin.mooc-monitor/ui/index.html")
+            .is_file());
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]

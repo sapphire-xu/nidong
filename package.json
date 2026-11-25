@@ -1,7 +1,7 @@
 {
   "name": "nidong",
   "private": true,
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "东北大学桌面看板",
   "author": "sapphire_fic",
   "license": "MIT",
@@ -12,7 +12,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prestart": "call scripts\\stage-meter.bat",
+    "prestart": "node scripts/stage-meter.mjs",
     "start": "tauri dev",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",

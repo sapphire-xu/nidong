@@ -17,6 +17,7 @@ use url::Url;
 const MAX_URLS: usize = 20;
 const ATTEMPTS: u32 = 3;
 const SYNC_EVERY: u64 = 4 * 1024 * 1024;
+#[cfg(windows)]
 const INTERNET_SETTINGS: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -896,15 +897,63 @@ fn allocate_paths(dir: &Path, desired: &str, url: &str) -> (String, PathBuf) {
     (name, partial)
 }
 
+#[cfg_attr(windows, allow(dead_code))]
+fn parse_xdg_download_dir(content: &str, home: &str) -> Option<PathBuf> {
+    for raw in content.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some(rest) = line.strip_prefix("XDG_DOWNLOAD_DIR=") else {
+            continue;
+        };
+        let val = rest.trim().trim_matches('"').trim_matches('\'');
+        if val.is_empty() {
+            continue;
+        }
+        if let Some(sub) = val.strip_prefix("$HOME/") {
+            return Some(PathBuf::from(home).join(sub));
+        }
+        if val == "$HOME" {
+            return Some(PathBuf::from(home));
+        }
+        let p = PathBuf::from(val);
+        if val.starts_with('/') || p.is_absolute() {
+            return Some(p);
+        }
+    }
+    None
+}
+
 fn downloads_dir() -> PathBuf {
-    if let Ok(home) = std::env::var("USERPROFILE") {
-        let dir = PathBuf::from(home).join("Downloads");
-        if dir.is_dir() {
+    #[cfg(windows)]
+    {
+        if let Ok(home) = std::env::var("USERPROFILE") {
+            let dir = PathBuf::from(home).join("Downloads");
+            if dir.is_dir() {
+                return dir;
+            }
             return dir;
         }
-        return dir;
+        PathBuf::from(".")
     }
-    PathBuf::from(".")
+    #[cfg(not(windows))]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            let cfg_base = std::env::var("XDG_CONFIG_HOME")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(&home).join(".config"));
+            if let Ok(text) = std::fs::read_to_string(cfg_base.join("user-dirs.dirs")) {
+                if let Some(dir) = parse_xdg_download_dir(&text, &home) {
+                    return dir;
+                }
+            }
+            return PathBuf::from(home).join("Downloads");
+        }
+        PathBuf::from(".")
+    }
 }
 
 fn downloads_dir_string() -> String {
@@ -1014,12 +1063,14 @@ fn endpoint_label(url: &str) -> String {
         .to_string()
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 struct ParsedProxy {
     http: Option<String>,
     https: Option<String>,
     socks: bool,
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn parse_proxy_server(raw: &str) -> ParsedProxy {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -1083,6 +1134,7 @@ fn normalize_proxy_url(value: &str) -> Option<String> {
     Some(format!("http://{value}"))
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn parse_bypass(raw: &str) -> Vec<String> {
     raw.split(';')
         .map(|item| item.trim().to_string())
@@ -1177,7 +1229,63 @@ fn current_proxy() -> ProxySnap {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn current_proxy() -> ProxySnap {
+    let dp = crate::util::linux_desktop_proxy();
+    let mut bypass = dp.bypass;
+    for key in ["NO_PROXY", "no_proxy"] {
+        if let Ok(val) = std::env::var(key) {
+            for item in val.split([',', ';']) {
+                let item = item.trim();
+                if !item.is_empty() && !bypass.iter().any(|b| b == item) {
+                    bypass.push(item.to_string());
+                }
+            }
+        }
+    }
+    if !dp.enabled {
+        return ProxySnap {
+            http: None,
+            https: None,
+            bypass,
+            kind: "off",
+            label: String::new(),
+        };
+    }
+    if dp.http.is_some() || dp.https.is_some() {
+        let label = dp
+            .https
+            .clone()
+            .or(dp.http.clone())
+            .map(|value| endpoint_label(&value))
+            .unwrap_or_default();
+        return ProxySnap {
+            http: dp.http,
+            https: dp.https,
+            bypass,
+            kind: "http",
+            label,
+        };
+    }
+    if let Some(socks) = dp.socks {
+        return ProxySnap {
+            http: None,
+            https: None,
+            bypass,
+            kind: "socks",
+            label: endpoint_label(&socks),
+        };
+    }
+    ProxySnap {
+        http: None,
+        https: None,
+        bypass,
+        kind: "off",
+        label: String::new(),
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn current_proxy() -> ProxySnap {
     ProxySnap {
         http: None,
@@ -1290,9 +1398,42 @@ fn schedule_shutdown() -> std::result::Result<(), String> {
             Err("没有发出关机。".into())
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     {
-        Err("只有 Windows 会在下载完成后关机。".into())
+        let target_usec = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs().saturating_add(60).saturating_mul(1_000_000))
+            .unwrap_or(0);
+        if target_usec > 0 {
+            let usec_str = target_usec.to_string();
+            let dbus = std::process::Command::new("busctl")
+                .args([
+                    "call",
+                    "org.freedesktop.login1",
+                    "/org/freedesktop/login1",
+                    "org.freedesktop.login1.Manager",
+                    "ScheduleShutdown",
+                    "st",
+                    "poweroff",
+                    &usec_str,
+                ])
+                .status();
+            if matches!(dbus, Ok(st) if st.success()) {
+                return Ok(());
+            }
+        }
+        let fallback = std::process::Command::new("shutdown")
+            .args(["-h", "+1", "泥洞的下载已经完成，一分钟后关机"])
+            .status();
+        if matches!(fallback, Ok(st) if st.success()) {
+            Ok(())
+        } else {
+            Err("没有发出关机（可能需要桌面会话权限或 systemd-logind）。".into())
+        }
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        Err("当前系统暂不支持下载完成后自动关机。".into())
     }
 }
 
@@ -1300,6 +1441,21 @@ fn abort_shutdown() {
     #[cfg(windows)]
     {
         let _ = std::process::Command::new("shutdown").args(["/a"]).status();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let dbus = std::process::Command::new("busctl")
+            .args([
+                "call",
+                "org.freedesktop.login1",
+                "/org/freedesktop/login1",
+                "org.freedesktop.login1.Manager",
+                "CancelScheduledShutdown",
+            ])
+            .status();
+        if !matches!(dbus, Ok(st) if st.success()) {
+            let _ = std::process::Command::new("shutdown").args(["-c"]).status();
+        }
     }
 }
 
@@ -1709,7 +1865,21 @@ fn disk_full(error: &std::io::Error) -> bool {
 }
 
 fn disk_full_io(error: &std::io::Error) -> bool {
-    matches!(error.raw_os_error(), Some(112) | Some(39))
+    if error.kind() == std::io::ErrorKind::StorageFull {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        matches!(error.raw_os_error(), Some(112) | Some(39))
+    }
+    #[cfg(unix)]
+    {
+        matches!(error.raw_os_error(), Some(28))
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        false
+    }
 }
 
 #[tauri::command]
@@ -1917,5 +2087,19 @@ mod tests {
         assert_eq!(total_from_content_range("bytes 0-1/123"), Some(123));
         assert_eq!(total_from_content_range("bytes 0-1/*"), None);
         assert_eq!(range_start("bytes 40-99/123"), Some(40));
+    }
+
+    #[test]
+    fn parses_xdg_user_download_dir() {
+        let content = "# comment\nXDG_DESKTOP_DIR=\"$HOME/桌面\"\nXDG_DOWNLOAD_DIR=\"$HOME/下载\"\n";
+        assert_eq!(
+            parse_xdg_download_dir(content, "/home/alice"),
+            Some(PathBuf::from("/home/alice").join("下载"))
+        );
+        let abs = "XDG_DOWNLOAD_DIR=\"/data/downloads\"\n";
+        assert_eq!(
+            parse_xdg_download_dir(abs, "/home/alice"),
+            Some(PathBuf::from("/data/downloads"))
+        );
     }
 }

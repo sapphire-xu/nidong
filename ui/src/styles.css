@@ -33,7 +33,7 @@ html, body, #root { margin: 0; height: 100%; background: transparent; overflow: 
 html { color-scheme: dark; }
 [data-theme="light"] { color-scheme: light; }
 body {
-  font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei", system-ui, sans-serif;
   color: var(--ink);
   user-select: none;
 }

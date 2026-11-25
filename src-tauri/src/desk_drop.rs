@@ -3,9 +3,13 @@
 //! 那时接收拖放的子窗口经常还没出现，Windows 就在光标上画禁止符号。
 //! 窗口真正显示之后再登记一次。悬浮岛不走这里。
 
+#[cfg(windows)]
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::AppHandle;
+#[cfg(windows)]
+use tauri::{Emitter, Manager};
 
+#[cfg(windows)]
 #[derive(Clone, Serialize)]
 struct DeskFileDrop {
     kind: &'static str,

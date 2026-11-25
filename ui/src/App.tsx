@@ -7,8 +7,9 @@ import { upcomingCourse } from "./course";
 import { abortFold, HIDE_AFTER_MS, HIDE_POLL_MS, HIDE_PULSE_EVENT, shouldResetIdle, stepHide, type HidePhase } from "./autoHide";
 import { deriveDay } from "./dayModel";
 import { fmtMoney, ymd } from "./format";
+import { getPlatformInfo } from "./platform";
 import { clampVolume, resolveTheme, withSettingDefaults } from "./prefs";
-import type { AppSettings, Course, Snapshot } from "./types";
+import type { AppSettings, Course, PlatformInfo, Snapshot } from "./types";
 import { useClock } from "./useClock";
 
 let remindAudio: HTMLAudioElement | null = null;
@@ -86,10 +87,20 @@ export default function App() {
   const hintTimer = useRef(0);
   const settingsFlight = useRef(false);
   const settingsRetryAt = useRef(0);
+  const showIslandRef = useRef(true);
+  const platformRef = useRef<PlatformInfo>({
+    os: "windows",
+    session: "windows",
+    meterSupported: true,
+    islandPositionable: true,
+    autoUpdateSupported: true,
+    desktopNotifySupported: false,
+  });
 
   const theme = resolveTheme(settings?.theme);
   const loggedIn = !!snap?.loggedIn;
   settingsRef.current = settings;
+  showIslandRef.current = settings?.showIsland !== false;
   remindRef.current = remind;
   autoHideRef.current = !!settings && settings.autoHide !== false;
   autoHideHoverRef.current = !!settings?.autoHideHover;
@@ -129,6 +140,9 @@ export default function App() {
 
   useEffect(() => {
     api.bootstrap().then(setSnap).catch(() => undefined);
+    void getPlatformInfo().then((info) => {
+      platformRef.current = info;
+    });
     ensureSettingsRef.current();
   }, []);
 
@@ -142,6 +156,7 @@ export default function App() {
   };
 
   const showIsland = () => {
+    if (!showIslandRef.current) return;
     void api.raiseTopmost().catch(() => {
       void getCurrentWindow().show().catch(() => undefined);
     });
@@ -209,7 +224,7 @@ export default function App() {
     }
     const w = getCurrentWindow();
     try {
-      if (autoHideHoverRef.current) {
+      if (autoHideHoverRef.current && platformRef.current.islandPositionable) {
         const pos = await w.outerPosition();
         const size = await w.outerSize();
         if (dropped()) {
@@ -398,7 +413,17 @@ export default function App() {
 
   const startRemind = (course: Course & { kind?: "class" | "event" }) => {
     if (remindSoundRef.current) playRemindSound(remindVolumeRef.current);
-    const next = { name: course.name, start: course.start, kind: course.kind || "class" as const };
+    const kind = course.kind || ("class" as const);
+    if (
+      platformRef.current.desktopNotifySupported &&
+      (!showIslandRef.current || platformRef.current.session === "wayland")
+    ) {
+      const title = kind === "event" ? "泥洞 · 日程提醒" : "泥洞 · 上课提醒";
+      const body = [course.name, course.start, course.place].filter(Boolean).join(" · ");
+      void api.desktopNotify(title, body).catch(() => undefined);
+    }
+    if (!showIslandRef.current) return;
+    const next = { name: course.name, start: course.start, kind };
     const wasHidden = phaseRef.current === "hidden";
     remindRef.current = next;
     preRemindRef.current = { hidden: wasHidden };
@@ -455,6 +480,9 @@ export default function App() {
       if (!campusHintRef.current) preHintHidden.current = phaseRef.current === "hidden";
       campusHintRef.current = text;
       setCampusHint(text);
+      if (!showIslandRef.current && platformRef.current.desktopNotifySupported && !text.startsWith("正在")) {
+        void api.desktopNotify("泥洞 · 校园网", text).catch(() => undefined);
+      }
       if (!gameFsRef.current) revealRef.current();
       if (!text.startsWith("正在")) {
         hintClearAt.current = performance.now() + 4000;
@@ -664,6 +692,26 @@ export default function App() {
     }
     if (draggingRef.current || (e.buttons & 1) === 0) return;
     if (Math.hypot(e.screenX - o.x, e.screenY - o.y) < 6) return;
+    // Linux（尤其 Wayland）下无法手动 setPosition，交给系统原生 startDragging。
+    if (platformRef.current.os === "linux") {
+      draggingRef.current = true;
+      dragOrigin.current = null;
+      dragSession.current = null;
+      if ((e.currentTarget as HTMLElement).hasPointerCapture?.(e.pointerId)) {
+        try {
+          (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+        } catch {
+          /* already released */
+        }
+      }
+      void getCurrentWindow()
+        .startDragging()
+        .catch(() => undefined)
+        .finally(() => {
+          finishDrag();
+        });
+      return;
+    }
     // 不用 startDragging：Windows 会把它当成标题栏拖动，画出最小化按钮，松手后还可能卡死。
     draggingRef.current = true;
     const gen = ++dragGen.current;

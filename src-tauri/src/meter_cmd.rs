@@ -1,10 +1,15 @@
 //! 网费页开关本机流量记录。计数在提权的 nidong-meter.exe 里，泥洞本身不提权。
 
+#[cfg(windows)]
 use std::fs;
+#[cfg(windows)]
 use std::path::PathBuf;
+#[cfg(windows)]
 use std::thread;
+#[cfg(windows)]
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
 fn find_exe() -> Result<PathBuf, String> {
     if let Ok(cur) = std::env::current_exe() {
         if let Some(dir) = cur.parent() {
@@ -24,6 +29,7 @@ fn find_exe() -> Result<PathBuf, String> {
     Err("流量记录程序不在安装目录里。".into())
 }
 
+#[cfg(windows)]
 fn launch(exe: &std::path::Path, args: &str) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows::core::PCWSTR;
@@ -52,12 +58,14 @@ fn launch(exe: &std::path::Path, args: &str) -> Result<(), String> {
     }
 }
 
+#[cfg(windows)]
 fn enabled_now() -> bool {
     fs::read_to_string(nidong_meter::meter_dir().join("enabled.txt"))
         .map(|text| text.trim() == "on")
         .unwrap_or(false)
 }
 
+#[cfg(windows)]
 fn error_now() -> String {
     fs::read_to_string(nidong_meter::meter_dir().join("error.txt"))
         .unwrap_or_default()
@@ -65,6 +73,7 @@ fn error_now() -> String {
         .to_string()
 }
 
+#[cfg(windows)]
 fn wait_enabled(want: bool) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(8);
     while Instant::now() < deadline {
@@ -96,42 +105,67 @@ pub fn meter_log() -> Vec<nidong_meter::Day> {
 
 #[tauri::command]
 pub fn meter_enable() -> Result<(), String> {
-    let exe = find_exe()?;
-    let _ = fs::remove_file(nidong_meter::meter_dir().join("error.txt"));
-    launch(&exe, "--enable")?;
-    wait_enabled(true)
+    #[cfg(windows)]
+    {
+        let exe = find_exe()?;
+        let _ = fs::remove_file(nidong_meter::meter_dir().join("error.txt"));
+        launch(&exe, "--enable")?;
+        wait_enabled(true)
+    }
+    #[cfg(not(windows))]
+    {
+        Err("本机流量记录暂仅支持 Windows，Linux 版本开发中。".into())
+    }
 }
 
 #[tauri::command]
 pub fn meter_disable() -> Result<(), String> {
-    let exe = find_exe()?;
-    let _ = fs::remove_file(nidong_meter::meter_dir().join("error.txt"));
-    launch(&exe, "--disable")?;
-    wait_enabled(false)
+    #[cfg(windows)]
+    {
+        let exe = find_exe()?;
+        let _ = fs::remove_file(nidong_meter::meter_dir().join("error.txt"));
+        launch(&exe, "--disable")?;
+        wait_enabled(false)
+    }
+    #[cfg(not(windows))]
+    {
+        Err("本机流量记录暂仅支持 Windows，Linux 版本开发中。".into())
+    }
 }
 
 #[tauri::command]
-pub fn meter_open_log() -> Result<(), String> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows::core::PCWSTR;
-    use windows::Win32::UI::Shell::ShellExecuteW;
-    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-
+pub fn meter_open_log(app: tauri::AppHandle) -> Result<(), String> {
     let path = nidong_meter::ensure_log_file();
-    let path_w: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-    let rc = unsafe {
-        ShellExecuteW(
-            None,
-            PCWSTR::null(),
-            PCWSTR(path_w.as_ptr()),
-            PCWSTR::null(),
-            PCWSTR::null(),
-            SW_SHOWNORMAL,
-        )
-    };
-    if (rc.0 as isize) > 32 {
-        Ok(())
-    } else {
-        Err("没有打开日志文件。".into())
+    #[cfg(windows)]
+    {
+        let _ = app;
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+        let path_w: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let rc = unsafe {
+            ShellExecuteW(
+                None,
+                PCWSTR::null(),
+                PCWSTR(path_w.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if (rc.0 as isize) > 32 {
+            Ok(())
+        } else {
+            Err("没有打开日志文件。".into())
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        use tauri_plugin_opener::OpenerExt;
+        app.opener()
+            .open_path(path.to_string_lossy().to_string(), None::<&str>)
+            .map_err(|e| format!("没有打开日志文件：{e}"))
     }
 }

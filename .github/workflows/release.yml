@@ -1,0 +1,303 @@
+name: Build & Release (Windows + Linux)
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: '构建目标平台'
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - linux
+          - windows
+      create_release:
+        description: '手动触发时创建 Draft GitHub Release'
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag_name: ${{ steps.meta.outputs.tag_name }}
+      should_release: ${{ steps.meta.outputs.should_release }}
+      build_windows: ${{ steps.meta.outputs.build_windows }}
+      build_linux: ${{ steps.meta.outputs.build_linux }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version and targets
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            if [[ "$TAG" != "v${VERSION}" ]]; then
+              echo "::error::Tag ${TAG} 与 src-tauri/tauri.conf.json 中的版本 ${VERSION} 不一致。"
+              exit 1
+            fi
+            echo "tag_name=$TAG" >> "$GITHUB_OUTPUT"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "build_windows=true" >> "$GITHUB_OUTPUT"
+            echo "build_linux=true" >> "$GITHUB_OUTPUT"
+          else
+            PLATFORM="${{ inputs.platform || 'all' }}"
+            CREATE_REL="${{ inputs.create_release || false }}"
+            echo "tag_name=v${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "should_release=$CREATE_REL" >> "$GITHUB_OUTPUT"
+            if [[ "$PLATFORM" == "all" || "$PLATFORM" == "windows" ]]; then
+              echo "build_windows=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "build_windows=false" >> "$GITHUB_OUTPUT"
+            fi
+            if [[ "$PLATFORM" == "all" || "$PLATFORM" == "linux" ]]; then
+              echo "build_linux=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "build_linux=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+  build-windows:
+    name: Build Windows (NSIS + nidong-meter)
+    needs: prepare
+    if: needs.prepare.outputs.build_windows == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run frontend unit tests
+        run: node --test ui/src/autoHide.test.ts ui/src/hidePulse.test.ts ui/src/repeatText.test.ts ui/src/desk/navModel.test.ts
+
+      - name: Stage nidong-meter sidecar and run Rust tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --manifest-path src-tauri/meter/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File src-tauri/meter/stage.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --manifest-path src-tauri/Cargo.toml --lib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build Windows NSIS installer
+        shell: pwsh
+        env:
+          CI: 'true'
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            Write-Host "No TAURI_SIGNING_PRIVATE_KEY secret configured; building unsigned Windows installer."
+            $override = Join-Path $env:RUNNER_TEMP "tauri-unsigned.json"
+            Set-Content -LiteralPath $override -Value '{"bundle":{"createUpdaterArtifacts":false}}' -Encoding utf8
+            npx tauri build --config $override
+          } else {
+            Write-Host "Signing key detected; building signed Windows updater installer."
+            npx tauri build
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Collect Windows artifacts
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ver = $env:APP_VERSION
+          $nsis = "src-tauri/target/release/bundle/nsis"
+          $setup = Get-ChildItem -LiteralPath $nsis -Filter "*_${ver}_x64-setup.exe" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $setup) {
+            Write-Error "Missing Windows NSIS installer for version $ver"
+            exit 1
+          }
+          $product = [string]$setup.VersionInfo.ProductVersion
+          if ($product -notmatch ('^' + [regex]::Escape($ver) + '(\.|$)')) {
+            Write-Error "Installer ProductVersion ($product) does not match $ver"
+            exit 1
+          }
+          $outDir = "release-assets/windows"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          $destExe = Join-Path $outDir "nidong_${ver}_x64-setup.exe"
+          Copy-Item -LiteralPath $setup.FullName -Destination $destExe -Force
+          $sig = $setup.FullName + ".sig"
+          if (Test-Path -LiteralPath $sig) {
+            Copy-Item -LiteralPath $sig -Destination ($destExe + ".sig") -Force
+          }
+          Get-ChildItem $outDir | Format-Table Name, Length
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nidong-windows
+          path: release-assets/windows/*
+          retention-days: 30
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux (deb + AppImage)
+    needs: prepare
+    if: needs.prepare.outputs.build_linux == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl wget file patchelf pkg-config xdg-utils \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libssl-dev libdbus-1-dev \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good libnotify-bin
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run frontend and Linux Rust tests
+        run: |
+          set -euo pipefail
+          node --test ui/src/autoHide.test.ts ui/src/hidePulse.test.ts ui/src/repeatText.test.ts ui/src/desk/navModel.test.ts
+          cargo test --manifest-path src-tauri/meter/Cargo.toml
+          cargo test --manifest-path src-tauri/Cargo.toml --lib
+
+      - name: Build Linux deb and AppImage
+        env:
+          CI: 'true'
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          NO_STRIP: 'true'
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "Signing key detected; building signed Linux updater artifacts."
+            npx tauri build --bundles deb,appimage --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          else
+            echo "No TAURI_SIGNING_PRIVATE_KEY secret configured; building unsigned Linux packages."
+            npx tauri build --bundles deb,appimage
+          fi
+
+      - name: Collect and verify Linux artifacts
+        env:
+          APP_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets/linux
+          DEB="src-tauri/target/release/bundle/deb/nidong_${APP_VERSION}_amd64.deb"
+          APPIMG="src-tauri/target/release/bundle/appimage/nidong_${APP_VERSION}_amd64.AppImage"
+          test -f "$DEB"
+          test -f "$APPIMG"
+          dpkg-deb -I "$DEB"
+          cp "$DEB" release-assets/linux/
+          cp "$APPIMG" release-assets/linux/
+          if [ -f "${APPIMG}.sig" ]; then
+            cp "${APPIMG}.sig" release-assets/linux/
+          fi
+          ls -lh release-assets/linux/
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nidong-linux
+          path: release-assets/linux/*
+          retention-days: 30
+          if-no-files-found: error
+
+  release:
+    name: Create Draft GitHub Release
+    needs: [prepare, build-windows, build-linux]
+    if: >-
+      always() &&
+      needs.prepare.outputs.should_release == 'true' &&
+      needs.prepare.result == 'success' &&
+      (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped') &&
+      (needs.build-linux.result == 'success' || needs.build-linux.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS.txt
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create or update Draft Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.prepare.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG_NAME" release-assets/* \
+              --draft \
+              --target "$GITHUB_SHA" \
+              --title "泥洞 ${TAG_NAME}" \
+              --generate-notes \
+              --repo "$GITHUB_REPOSITORY"
+          fi

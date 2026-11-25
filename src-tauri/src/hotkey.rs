@@ -3,14 +3,16 @@
 //! 钩子里只记录按键，真正弹窗放到独立线程 / 主线程，避免在钩子回调里调窗口 API。
 
 use crate::models::AppSettings;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Mutex, OnceLock};
+#[cfg(windows)]
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
 const MAX_KEYS: usize = 4;
 /// 组合键必须在这个时间内全部按下，才算一次和弦，避免先按 Tab 过很久再按 Q。
+#[cfg(windows)]
 const CHORD_MS: u64 = 400;
 
 #[derive(Clone, Copy)]
@@ -19,6 +21,7 @@ enum HotkeyEvt {
     Up,
 }
 
+#[cfg(windows)]
 struct KeyMap {
     down: [bool; 256],
     at_ms: [u64; 256],
@@ -35,6 +38,7 @@ static KEYS: [AtomicU32; MAX_KEYS] = [
     AtomicU32::new(0),
     AtomicU32::new(0),
 ];
+#[cfg(windows)]
 static KEY_MAP: Mutex<KeyMap> = Mutex::new(KeyMap {
     down: [false; 256],
     at_ms: [0; 256],
@@ -46,6 +50,38 @@ static HOVER_X: AtomicI32 = AtomicI32::new(0);
 static HOVER_Y: AtomicI32 = AtomicI32::new(0);
 static HOVER_W: AtomicI32 = AtomicI32::new(0);
 static HOVER_H: AtomicI32 = AtomicI32::new(0);
+
+static HOTKEY_GEN: AtomicU64 = AtomicU64::new(0);
+#[cfg(target_os = "linux")]
+static RAW_HOTKEY: Mutex<String> = Mutex::new(String::new());
+
+#[cfg(target_os = "linux")]
+pub fn is_x11_session() -> bool {
+    let xdg = std::env::var("XDG_SESSION_TYPE").ok();
+    let wayland = std::env::var("WAYLAND_DISPLAY").ok();
+    let display = std::env::var("DISPLAY").ok();
+    is_x11_env(xdg.as_deref(), wayland.as_deref(), display.as_deref())
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn is_x11_env(
+    xdg_type: Option<&str>,
+    wayland_display: Option<&str>,
+    display: Option<&str>,
+) -> bool {
+    if let Some(t) = xdg_type.map(str::trim).filter(|s| !s.is_empty()) {
+        if t.eq_ignore_ascii_case("wayland") {
+            return false;
+        }
+        if t.eq_ignore_ascii_case("x11") {
+            return display.is_some_and(|d| !d.trim().is_empty());
+        }
+    }
+    if wayland_display.is_some_and(|w| !w.trim().is_empty()) {
+        return false;
+    }
+    display.is_some_and(|d| !d.trim().is_empty())
+}
 
 pub fn init(app: AppHandle) {
     let _ = APP.set(app);
@@ -68,10 +104,18 @@ pub fn init(app: AppHandle) {
         win::start_hover_thread();
         win::start_fullscreen_thread();
     }
+    #[cfg(target_os = "linux")]
+    {
+        if is_x11_session() {
+            linux_x11::start_hotkey_thread();
+            linux_x11::start_hover_thread();
+            linux_x11::start_fullscreen_thread();
+        }
+    }
 }
 
 pub fn update(settings: &AppSettings) {
-    let on = settings.auto_hide && settings.auto_hide_hotkey;
+    let on = settings.show_island && settings.auto_hide && settings.auto_hide_hotkey;
     let combo = parse_hotkey(&settings.reveal_hotkey);
     for (i, slot) in KEYS.iter().enumerate() {
         slot.store(*combo.get(i).unwrap_or(&0), Ordering::Relaxed);
@@ -79,6 +123,13 @@ pub fn update(settings: &AppSettings) {
     NKEYS.store(combo.len().min(MAX_KEYS), Ordering::Relaxed);
     ENABLED.store(on && combo.len() >= 2, Ordering::Relaxed);
     FIRED.store(false, Ordering::Relaxed);
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(mut g) = RAW_HOTKEY.lock() {
+            *g = settings.reveal_hotkey.clone();
+        }
+    }
+    HOTKEY_GEN.fetch_add(1, Ordering::SeqCst);
 }
 
 /// 悬停满这么久才通知页面。藏起后页面定时器可能不跑，这一秒不能放在 setTimeout 里。
@@ -191,6 +242,7 @@ fn vk_of(p: &str) -> Option<u32> {
     })
 }
 
+#[cfg(windows)]
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -198,6 +250,7 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+#[cfg(windows)]
 fn combo_down() -> bool {
     let n = NKEYS.load(Ordering::Relaxed);
     if n < 2 {
@@ -213,6 +266,7 @@ fn combo_down() -> bool {
 }
 
 /// 所有组合键当前都按下，且最早/最晚按下不超过 CHORD_MS。忽略长按自动重复。
+#[cfg(windows)]
 fn combo_chord() -> bool {
     let n = NKEYS.load(Ordering::Relaxed);
     if n < 2 {
@@ -234,6 +288,7 @@ fn combo_chord() -> bool {
     max_at.saturating_sub(min_at) <= CHORD_MS
 }
 
+#[cfg(windows)]
 fn normalize_vk(vk: u32) -> u32 {
     match vk {
         0xA0 | 0xA1 => 0x10, // L/R Shift
@@ -243,6 +298,7 @@ fn normalize_vk(vk: u32) -> u32 {
     }
 }
 
+#[cfg(windows)]
 fn note_key(vk: u32, is_down: bool) {
     let vk = normalize_vk(vk);
     if vk >= 256 {
@@ -653,10 +709,359 @@ mod win {
     }
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const X11_MOD_CTRL: u32 = 1 << 0;
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const X11_MOD_ALT: u32 = 1 << 1;
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const X11_MOD_SHIFT: u32 = 1 << 2;
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const X11_MOD_SUPER: u32 = 1 << 3;
+
+/// 解析快捷键为 X11 `(modifier_bits, keysym)`。要求至少一个修饰键 + 一个主键。
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_x11_shortcut(s: &str) -> Option<(u32, u64)> {
+    let mut mods = 0u32;
+    let mut main_sym = None;
+    for raw in s.split('+') {
+        let u = raw.trim().to_ascii_uppercase();
+        if u.is_empty() {
+            continue;
+        }
+        match u.as_str() {
+            "CTRL" | "CONTROL" => mods |= X11_MOD_CTRL,
+            "ALT" => mods |= X11_MOD_ALT,
+            "SHIFT" => mods |= X11_MOD_SHIFT,
+            "WIN" | "META" | "SUPER" => mods |= X11_MOD_SUPER,
+            _ => {
+                if main_sym.is_some() {
+                    return None;
+                }
+                main_sym = x11_keysym_of(&u);
+            }
+        }
+    }
+    if mods == 0 {
+        return None;
+    }
+    Some((mods, main_sym?))
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn x11_keysym_of(u: &str) -> Option<u64> {
+    Some(match u {
+        "TAB" => 0xFF09,
+        "ESC" | "ESCAPE" => 0xFF1B,
+        "SPACE" | " " => 0x0020,
+        "ENTER" | "RETURN" => 0xFF0D,
+        "BACKSPACE" => 0xFF08,
+        x if x.len() == 1 => {
+            let c = x.chars().next()?;
+            if c.is_ascii_alphabetic() {
+                c.to_ascii_lowercase() as u64
+            } else if c.is_ascii_digit() {
+                c as u64
+            } else {
+                return None;
+            }
+        }
+        x if x.starts_with('F') => {
+            let n: u64 = x[1..].parse().ok()?;
+            if (1..=12).contains(&n) {
+                0xFFBE + n - 1
+            } else {
+                return None;
+            }
+        }
+        _ => return None,
+    })
+}
+
+#[cfg(target_os = "linux")]
+mod linux_x11 {
+    use super::*;
+    use std::ffi::CString;
+    use std::os::raw::{c_int, c_long, c_uchar, c_uint, c_ulong};
+    use std::ptr;
+    use x11_dl::xlib::{self, Xlib};
+
+    unsafe extern "C" fn ignore_x_error(
+        _display: *mut xlib::Display,
+        _error: *mut xlib::XErrorEvent,
+    ) -> c_int {
+        0
+    }
+
+    fn x11_mask(mods: u32) -> c_uint {
+        let mut mask: c_uint = 0;
+        if mods & X11_MOD_CTRL != 0 {
+            mask |= xlib::ControlMask;
+        }
+        if mods & X11_MOD_ALT != 0 {
+            mask |= xlib::Mod1Mask;
+        }
+        if mods & X11_MOD_SHIFT != 0 {
+            mask |= xlib::ShiftMask;
+        }
+        if mods & X11_MOD_SUPER != 0 {
+            mask |= xlib::Mod4Mask;
+        }
+        mask
+    }
+
+    const LOCK_COMBOS: [c_uint; 4] = [0, xlib::LockMask, xlib::Mod2Mask, xlib::LockMask | xlib::Mod2Mask];
+
+    pub fn start_hotkey_thread() {
+        std::thread::Builder::new()
+            .name("nidong-x11-hotkey".into())
+            .spawn(|| {
+                let Ok(xlib) = Xlib::open() else {
+                    return;
+                };
+                unsafe {
+                    (xlib.XSetErrorHandler)(Some(ignore_x_error));
+                    let display = (xlib.XOpenDisplay)(ptr::null());
+                    if display.is_null() {
+                        return;
+                    }
+                    let root = (xlib.XDefaultRootWindow)(display);
+                    let mut grabbed: Option<(c_int, c_uint)> = None;
+                    let mut seen_gen = u64::MAX;
+
+                    loop {
+                        let cur_gen = HOTKEY_GEN.load(Ordering::SeqCst);
+                        if cur_gen != seen_gen {
+                            seen_gen = cur_gen;
+                            if let Some((old_kc, old_mod)) = grabbed.take() {
+                                for lock in LOCK_COMBOS {
+                                    (xlib.XUngrabKey)(display, old_kc, old_mod | lock, root);
+                                }
+                            }
+                            if ENABLED.load(Ordering::Relaxed) {
+                                let raw = RAW_HOTKEY
+                                    .lock()
+                                    .map(|g| g.clone())
+                                    .unwrap_or_default();
+                                if let Some((mods, sym)) = parse_x11_shortcut(&raw) {
+                                    let kc = (xlib.XKeysymToKeycode)(display, sym as c_ulong) as c_int;
+                                    if kc != 0 {
+                                        let mask = x11_mask(mods);
+                                        for lock in LOCK_COMBOS {
+                                            (xlib.XGrabKey)(
+                                                display,
+                                                kc,
+                                                mask | lock,
+                                                root,
+                                                0,
+                                                xlib::GrabModeAsync,
+                                                xlib::GrabModeAsync,
+                                            );
+                                        }
+                                        grabbed = Some((kc, mask));
+                                    }
+                                }
+                            }
+                            (xlib.XFlush)(display);
+                        }
+
+                        while (xlib.XPending)(display) > 0 {
+                            let mut ev: xlib::XEvent = std::mem::zeroed();
+                            (xlib.XNextEvent)(display, &mut ev);
+                            let kind = ev.get_type();
+                            if kind == xlib::KeyPress {
+                                if !FIRED.swap(true, Ordering::SeqCst) {
+                                    fire_hotkey(HotkeyEvt::Down);
+                                }
+                            } else if kind == xlib::KeyRelease {
+                                if FIRED.swap(false, Ordering::SeqCst) {
+                                    fire_hotkey(HotkeyEvt::Up);
+                                }
+                            }
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(35));
+                    }
+                }
+            })
+            .ok();
+    }
+
+    pub fn start_hover_thread() {
+        std::thread::Builder::new()
+            .name("nidong-x11-hover".into())
+            .spawn(|| {
+                let Ok(xlib) = Xlib::open() else {
+                    return;
+                };
+                unsafe {
+                    (xlib.XSetErrorHandler)(Some(ignore_x_error));
+                    let display = (xlib.XOpenDisplay)(ptr::null());
+                    if display.is_null() {
+                        return;
+                    }
+                    let root = (xlib.XDefaultRootWindow)(display);
+                    let mut dwell = super::HoverDwell::default();
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(40));
+                        let tracking = HOVER_ON.load(Ordering::Relaxed);
+                        let inside = if tracking {
+                            let mut root_ret: xlib::Window = 0;
+                            let mut child_ret: xlib::Window = 0;
+                            let mut root_x: c_int = 0;
+                            let mut root_y: c_int = 0;
+                            let mut win_x: c_int = 0;
+                            let mut win_y: c_int = 0;
+                            let mut mask: c_uint = 0;
+                            let ok = (xlib.XQueryPointer)(
+                                display,
+                                root,
+                                &mut root_ret,
+                                &mut child_ret,
+                                &mut root_x,
+                                &mut root_y,
+                                &mut win_x,
+                                &mut win_y,
+                                &mut mask,
+                            ) != 0;
+                            let x = HOVER_X.load(Ordering::Relaxed);
+                            let y = HOVER_Y.load(Ordering::Relaxed);
+                            let w = HOVER_W.load(Ordering::Relaxed);
+                            let h = HOVER_H.load(Ordering::Relaxed);
+                            ok && w > 0 && h > 0 && root_x >= x && root_x < x + w && root_y >= y && root_y < y + h
+                        } else {
+                            false
+                        };
+                        if let Some(edge) = dwell.observe(tracking, inside, std::time::Instant::now()) {
+                            HOVER_INSIDE.store(edge, Ordering::SeqCst);
+                            emit_hover(edge);
+                        }
+                    }
+                }
+            })
+            .ok();
+    }
+
+    pub fn start_fullscreen_thread() {
+        std::thread::Builder::new()
+            .name("nidong-x11-fs".into())
+            .spawn(|| {
+                let Ok(xlib) = Xlib::open() else {
+                    return;
+                };
+                unsafe {
+                    (xlib.XSetErrorHandler)(Some(ignore_x_error));
+                    let display = (xlib.XOpenDisplay)(ptr::null());
+                    if display.is_null() {
+                        return;
+                    }
+                    let root = (xlib.XDefaultRootWindow)(display);
+                    let Ok(c_active) = CString::new("_NET_ACTIVE_WINDOW") else { return };
+                    let Ok(c_state) = CString::new("_NET_WM_STATE") else { return };
+                    let Ok(c_fs) = CString::new("_NET_WM_STATE_FULLSCREEN") else { return };
+                    let atom_active = (xlib.XInternAtom)(display, c_active.as_ptr(), 0);
+                    let atom_state = (xlib.XInternAtom)(display, c_state.as_ptr(), 0);
+                    let atom_fs = (xlib.XInternAtom)(display, c_fs.as_ptr(), 0);
+                    let mut last = false;
+
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(800));
+                        let on = active_window_is_fullscreen(&xlib, display, root, atom_active, atom_state, atom_fs);
+                        if on != last {
+                            last = on;
+                            emit_exclusive_fullscreen(on);
+                        }
+                    }
+                }
+            })
+            .ok();
+    }
+
+    unsafe fn active_window_is_fullscreen(
+        xlib: &Xlib,
+        display: *mut xlib::Display,
+        root: xlib::Window,
+        atom_active: xlib::Atom,
+        atom_state: xlib::Atom,
+        atom_fs: xlib::Atom,
+    ) -> bool {
+        let mut actual_type: xlib::Atom = 0;
+        let mut actual_format: c_int = 0;
+        let mut nitems: c_ulong = 0;
+        let mut bytes_after: c_ulong = 0;
+        let mut prop: *mut c_uchar = ptr::null_mut();
+
+        let st = (xlib.XGetWindowProperty)(
+            display,
+            root,
+            atom_active,
+            0 as c_long,
+            1 as c_long,
+            0,
+            xlib::AnyPropertyType as c_ulong,
+            &mut actual_type,
+            &mut actual_format,
+            &mut nitems,
+            &mut bytes_after,
+            &mut prop,
+        );
+        if st != xlib::Success as c_int || prop.is_null() || actual_format != 32 || nitems == 0 {
+            if !prop.is_null() {
+                (xlib.XFree)(prop.cast());
+            }
+            return false;
+        }
+        let active_win = *(prop as *const c_ulong) as xlib::Window;
+        (xlib.XFree)(prop.cast());
+        if active_win == 0 {
+            return false;
+        }
+
+        let mut st_prop: *mut c_uchar = ptr::null_mut();
+        let st2 = (xlib.XGetWindowProperty)(
+            display,
+            active_win,
+            atom_state,
+            0 as c_long,
+            32 as c_long,
+            0,
+            xlib::AnyPropertyType as c_ulong,
+            &mut actual_type,
+            &mut actual_format,
+            &mut nitems,
+            &mut bytes_after,
+            &mut st_prop,
+        );
+        if st2 != xlib::Success as c_int || st_prop.is_null() || actual_format != 32 {
+            if !st_prop.is_null() {
+                (xlib.XFree)(st_prop.cast());
+            }
+            return false;
+        }
+        let atoms = std::slice::from_raw_parts(st_prop as *const c_ulong, nitems as usize);
+        let is_fs = atoms.contains(&atom_fs);
+        (xlib.XFree)(st_prop.cast());
+        is_fs
+    }
+}
+
 #[cfg(test)]
 mod hover_dwell_tests {
-    use super::HoverDwell;
+    use super::{is_x11_env, parse_x11_shortcut, HoverDwell, X11_MOD_CTRL, X11_MOD_SHIFT, X11_MOD_SUPER};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn parses_x11_shortcuts_and_detects_session() {
+        assert_eq!(parse_x11_shortcut("Ctrl+Q"), Some((X11_MOD_CTRL, b'q' as u64)));
+        assert_eq!(
+            parse_x11_shortcut("Ctrl+Shift+F5"),
+            Some((X11_MOD_CTRL | X11_MOD_SHIFT, 0xFFBE + 4))
+        );
+        assert_eq!(parse_x11_shortcut("Super+Space"), Some((X11_MOD_SUPER, 0x0020)));
+        assert_eq!(parse_x11_shortcut("Tab+Q"), None);
+        assert!(is_x11_env(Some("x11"), None, Some(":0")));
+        assert!(!is_x11_env(Some("wayland"), Some("wayland-0"), Some(":0")));
+        assert!(!is_x11_env(None, Some("wayland-0"), Some(":0")));
+        assert!(is_x11_env(None, None, Some(":0")));
+    }
 
     #[test]
     fn announces_only_after_a_full_second() {

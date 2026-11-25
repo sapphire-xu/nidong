@@ -136,7 +136,7 @@ impl Worker {
         let Some(ep) = Endpoint::open() else {
             return;
         };
-        if ep.peak().unwrap_or(0.0) > AUDIO_PEAK {
+        if settings.smart_mute_idle && ep.peak().unwrap_or(0.0) > AUDIO_PEAK {
             self.last_sound = Instant::now();
             self.idle_hold = false;
         }
@@ -433,10 +433,172 @@ impl Drop for ComGuard {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_wpctl_muted(output: &str) -> Option<bool> {
+    let line = output.lines().find(|l| l.contains("Volume:"))?;
+    Some(line.contains("[MUTED]"))
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_pactl_muted(output: &str) -> Option<bool> {
+    for line in output.lines() {
+        if let Some(rest) = line.trim().strip_prefix("Mute:") {
+            let v = rest.trim().to_ascii_lowercase();
+            if v == "yes" {
+                return Some(true);
+            }
+            if v == "no" {
+                return Some(false);
+            }
+        }
+    }
+    None
+}
+
+/// 解析 `LC_ALL=C pactl list sink-inputs`：只要有任一未暂停（Corked: no）且未静音的播放流，即视为正在发声。
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_pactl_active_playback(output: &str) -> bool {
+    let mut in_block = false;
+    let mut corked = false;
+    let mut muted = false;
+    let check = |in_b: bool, c: bool, m: bool| in_b && !c && !m;
+    for raw in output.lines() {
+        let line = raw.trim();
+        if line.starts_with("Sink Input #") {
+            if check(in_block, corked, muted) {
+                return true;
+            }
+            in_block = true;
+            corked = false;
+            muted = false;
+            continue;
+        }
+        if !in_block {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("Corked:") {
+            corked = rest.trim().eq_ignore_ascii_case("yes");
+        } else if let Some(rest) = line.strip_prefix("Mute:") {
+            muted = rest.trim().eq_ignore_ascii_case("yes");
+        }
+    }
+    check(in_block, corked, muted)
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy)]
+enum LinuxAudioTool {
+    Wpctl,
+    Pactl,
+}
+
+#[cfg(target_os = "linux")]
+struct Endpoint {
+    tool: LinuxAudioTool,
+}
+
+#[cfg(target_os = "linux")]
+impl Endpoint {
+    fn run(prog: &str, args: &[&str]) -> Option<std::process::Output> {
+        std::process::Command::new(prog)
+            .args(args)
+            .env("LC_ALL", "C")
+            .output()
+            .ok()
+    }
+
+    fn open() -> Option<Self> {
+        if let Some(out) = Self::run("wpctl", &["get-volume", "@DEFAULT_AUDIO_SINK@"]) {
+            if out.status.success() {
+                return Some(Self {
+                    tool: LinuxAudioTool::Wpctl,
+                });
+            }
+        }
+        if let Some(out) = Self::run("pactl", &["get-sink-mute", "@DEFAULT_SINK@"]) {
+            if out.status.success() {
+                return Some(Self {
+                    tool: LinuxAudioTool::Pactl,
+                });
+            }
+        }
+        None
+    }
+
+    fn peak(&self) -> Option<f32> {
+        if let Some(out) = Self::run("pactl", &["list", "sink-inputs"]) {
+            if out.status.success() {
+                let active = parse_pactl_active_playback(&String::from_utf8_lossy(&out.stdout));
+                return Some(if active { 1.0 } else { 0.0 });
+            }
+        }
+        // 回退：检查 ALSA 播放流是否处于 RUNNING（不打开录音流，不会触发 GNOME 顶栏录音指示点）。
+        if let Ok(cards) = std::fs::read_dir("/proc/asound") {
+            for card in cards.flatten() {
+                let name = card.file_name();
+                if !name.to_string_lossy().starts_with("card") {
+                    continue;
+                }
+                let Ok(pcms) = std::fs::read_dir(card.path()) else {
+                    continue;
+                };
+                for pcm in pcms.flatten() {
+                    let pname = pcm.file_name();
+                    let pstr = pname.to_string_lossy();
+                    if !(pstr.starts_with("pcm") && pstr.ends_with('p')) {
+                        continue;
+                    }
+                    let Ok(subs) = std::fs::read_dir(pcm.path()) else {
+                        continue;
+                    };
+                    for sub in subs.flatten() {
+                        let status_path = sub.path().join("status");
+                        if let Ok(txt) = std::fs::read_to_string(status_path) {
+                            if txt.contains("state: RUNNING") {
+                                return Some(1.0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Some(0.0)
+    }
+
+    fn muted(&self) -> Option<bool> {
+        match self.tool {
+            LinuxAudioTool::Wpctl => {
+                let out = Self::run("wpctl", &["get-volume", "@DEFAULT_AUDIO_SINK@"])?;
+                if !out.status.success() {
+                    return None;
+                }
+                parse_wpctl_muted(&String::from_utf8_lossy(&out.stdout))
+            }
+            LinuxAudioTool::Pactl => {
+                let out = Self::run("pactl", &["get-sink-mute", "@DEFAULT_SINK@"])?;
+                if !out.status.success() {
+                    return None;
+                }
+                parse_pactl_muted(&String::from_utf8_lossy(&out.stdout))
+            }
+        }
+    }
+
+    fn set_mute(&self, muted: bool) -> bool {
+        let arg = if muted { "1" } else { "0" };
+        match self.tool {
+            LinuxAudioTool::Wpctl => Self::run("wpctl", &["set-mute", "@DEFAULT_AUDIO_SINK@", arg])
+                .is_some_and(|o| o.status.success()),
+            LinuxAudioTool::Pactl => Self::run("pactl", &["set-sink-mute", "@DEFAULT_SINK@", arg])
+                .is_some_and(|o| o.status.success()),
+        }
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 struct Endpoint;
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 impl Endpoint {
     fn open() -> Option<Self> {
         None
@@ -584,5 +746,22 @@ mod tests {
             "end": "2026-10-31T21:30"
         }));
         assert!(active_agenda_key(&[item], &at(2026, 10, 31, 21, 15)).is_none());
+    }
+
+    #[test]
+    fn linux_audio_parsers_detect_mute_and_playback() {
+        assert_eq!(parse_wpctl_muted("Volume: 0.45 [MUTED]\n"), Some(true));
+        assert_eq!(parse_wpctl_muted("Volume: 0.80\n"), Some(false));
+        assert_eq!(parse_pactl_muted("Mute: yes\n"), Some(true));
+        assert_eq!(parse_pactl_muted("Mute: no\n"), Some(false));
+
+        let playing = "Sink Input #42\n\tDriver: PipeWire\n\tCorked: no\n\tMute: no\n";
+        assert!(parse_pactl_active_playback(playing));
+
+        let paused = "Sink Input #42\n\tCorked: yes\n\tMute: no\n";
+        assert!(!parse_pactl_active_playback(paused));
+
+        let muted_stream = "Sink Input #42\n\tCorked: no\n\tMute: yes\n";
+        assert!(!parse_pactl_active_playback(muted_stream));
     }
 }

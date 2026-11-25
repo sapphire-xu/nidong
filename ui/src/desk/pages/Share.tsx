@@ -5,6 +5,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState } from "react";
 import { api, type ShareFile, type ShareOffer } from "../../api";
+import { usePlatformInfo } from "../../platform";
 import type { AppSettings } from "../../types";
 
 const MAX_FILES = 100;
@@ -41,6 +42,7 @@ function without(list: ShareFile[], file: ShareFile) {
 
 export function SharePanel(props: { settings: AppSettings; onSettings: (patch: Partial<AppSettings>) => void }) {
   const { settings, onSettings } = props;
+  const platform = usePlatformInfo();
   const [items, setItems] = useState<ShareFile[]>([]);
   const [offer, setOffer] = useState<ShareOffer | null>(null);
   const [note, setNote] = useState("");
@@ -418,7 +420,11 @@ export function SharePanel(props: { settings: AppSettings; onSettings: (patch: P
               <p>接收者无需安装泥洞。电脑和手机的浏览器都可以打开网址，输入口令后下载。</p>
               <p>关掉窗口也会继续分享，退出泥洞/停止分享才会停。</p>
               <p>分享开始后也可以增删文件。拖入同名文件，以新的那份为准。</p>
-              <p>对方打不开页面时，请检查防火墙中设置允许泥洞访问公用网络。</p>
+              <p>
+                {platform.os === "linux"
+                  ? "对方打不开页面时，请检查系统防火墙（如 ufw / firewalld）是否已放行 38721 端口。"
+                  : "对方打不开页面时，请检查防火墙中设置允许泥洞访问公用网络。"}
+              </p>
               <p><strong>若分享网页打开速度极慢，请检查并关闭发送主机的下载任务。</strong></p>
               <p><strong>文件传输接受学校监管，请遵守网络规则。</strong></p>
             </DialogContent>

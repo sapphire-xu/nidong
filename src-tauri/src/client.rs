@@ -334,7 +334,12 @@ impl NeuClient {
 
     pub fn persist_cookies(&self) -> Result<()> {
         let path = self.data_dir.join("cookies.json");
-        let mut f = fs::File::create(path)?;
+        let mut f = fs::File::create(&path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        }
         let locked = self.jar.lock().map_err(|e| e.to_string())?;
         cookie_store::serde::json::save(&locked, &mut f)
             .map_err(|e| AppError::Msg(e.to_string()))?;

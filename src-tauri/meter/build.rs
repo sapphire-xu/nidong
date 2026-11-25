@@ -16,6 +16,10 @@ const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?
 "#;
 
 fn main() {
+    // 仅在 Windows release 构建时嵌入 UAC 清单。
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
     // 调试构建不嵌入。cargo test 若继承这份清单，会因需要提权而起不来。
     let profile = env::var("PROFILE").unwrap_or_default();
     if profile != "release" {

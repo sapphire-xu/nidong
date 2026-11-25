@@ -48,6 +48,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
+#[cfg(target_os = "linux")]
+use tauri::menu::PredefinedMenuItem;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewWindow};
 use tokio::sync::Mutex as AsyncMutex;
@@ -272,8 +274,24 @@ fn tray_tip(snap: &Snapshot) -> String {
     }
 }
 
+#[cfg(target_os = "linux")]
+struct LinuxTrayStatus {
+    card: MenuItem<tauri::Wry>,
+    net: MenuItem<tauri::Wry>,
+    elec: MenuItem<tauri::Wry>,
+}
+
 fn sync_tray(app: &AppHandle, snap: &Snapshot) {
     let text = tray_tip(snap);
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(items) = app.try_state::<LinuxTrayStatus>() {
+            let (card, net, elec) = tray_labels(snap);
+            let _ = items.card.set_text(card);
+            let _ = items.net.set_text(net);
+            let _ = items.elec.set_text(elec);
+        }
+    }
     static LAST: Mutex<String> = Mutex::new(String::new());
     if LAST.lock().unwrap().as_str() == text {
         return;
@@ -301,6 +319,7 @@ fn version_parts(v: &str) -> Vec<u64> {
         .collect()
 }
 
+#[cfg(windows)]
 fn is_dev_exe(path: &str) -> bool {
     let text = path.to_ascii_lowercase();
     text.contains("\\target\\debug\\") || text.contains("\\target\\release\\")
@@ -571,6 +590,171 @@ fn evict_other_copies() {
 #[cfg(not(windows))]
 fn evict_other_copies() {}
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlatformInfo {
+    os: String,
+    session: String,
+    meter_supported: bool,
+    island_positionable: bool,
+    auto_update_supported: bool,
+    desktop_notify_supported: bool,
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn detect_linux_session(
+    xdg_type: Option<&str>,
+    wayland_display: Option<&str>,
+    display: Option<&str>,
+) -> &'static str {
+    if let Some(t) = xdg_type.map(str::trim).filter(|s| !s.is_empty()) {
+        if t.eq_ignore_ascii_case("wayland") {
+            return "wayland";
+        }
+        if t.eq_ignore_ascii_case("x11") {
+            return "x11";
+        }
+    }
+    if wayland_display.is_some_and(|w| !w.trim().is_empty()) {
+        return "wayland";
+    }
+    if display.is_some_and(|d| !d.trim().is_empty()) {
+        return "x11";
+    }
+    "other"
+}
+
+fn current_platform_info() -> PlatformInfo {
+    #[cfg(windows)]
+    {
+        PlatformInfo {
+            os: "windows".into(),
+            session: "windows".into(),
+            meter_supported: nidong_meter::is_supported(),
+            island_positionable: true,
+            auto_update_supported: true,
+            desktop_notify_supported: false,
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let xdg = std::env::var("XDG_SESSION_TYPE").ok();
+        let wayland = std::env::var("WAYLAND_DISPLAY").ok();
+        let display = std::env::var("DISPLAY").ok();
+        let session = detect_linux_session(xdg.as_deref(), wayland.as_deref(), display.as_deref());
+        let is_appimage = std::env::var("APPIMAGE")
+            .ok()
+            .is_some_and(|v| !v.trim().is_empty());
+        PlatformInfo {
+            os: "linux".into(),
+            session: session.into(),
+            meter_supported: nidong_meter::is_supported(),
+            island_positionable: session == "x11",
+            auto_update_supported: is_appimage,
+            desktop_notify_supported: true,
+        }
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        PlatformInfo {
+            os: std::env::consts::OS.into(),
+            session: "other".into(),
+            meter_supported: nidong_meter::is_supported(),
+            island_positionable: true,
+            auto_update_supported: true,
+            desktop_notify_supported: false,
+        }
+    }
+}
+
+#[tauri::command]
+fn platform_info() -> PlatformInfo {
+    current_platform_info()
+}
+
+#[tauri::command]
+fn desktop_notify(title: String, body: String) {
+    #[cfg(target_os = "linux")]
+    {
+        let title = title.trim().to_string();
+        let body = body.trim().to_string();
+        if title.is_empty() && body.is_empty() {
+            return;
+        }
+        std::thread::spawn(move || {
+            let sent = std::process::Command::new("notify-send")
+                .args([
+                    "-a",
+                    "泥洞",
+                    "-i",
+                    "nidong",
+                    "--",
+                    &title,
+                    &body,
+                ])
+                .status();
+            if matches!(sent, Ok(st) if st.success()) {
+                return;
+            }
+            let _ = std::process::Command::new("gdbus")
+                .args([
+                    "call",
+                    "--session",
+                    "--dest",
+                    "org.freedesktop.Notifications",
+                    "--object-path",
+                    "/org/freedesktop/Notifications",
+                    "--method",
+                    "org.freedesktop.Notifications.Notify",
+                    "泥洞",
+                    "0",
+                    "",
+                    &title,
+                    &body,
+                    "[]",
+                    "{}",
+                    "8000",
+                ])
+                .status();
+        });
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (title, body);
+    }
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn format_desktop_exec(exe: &str, args: &[&str]) -> String {
+    let quote = |s: &str| {
+        if s.chars()
+            .any(|c| c.is_whitespace() || matches!(c, '"' | '\\' | '$' | '`' | '\''))
+        {
+            let escaped = s
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('$', "\\$")
+                .replace('`', "\\`");
+            format!("\"{escaped}\"")
+        } else {
+            s.to_string()
+        }
+    };
+    let mut parts = vec![quote(exe)];
+    for arg in args {
+        parts.push(quote(arg));
+    }
+    parts.join(" ")
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn build_autostart_desktop(exe: &str) -> String {
+    let exec = format_desktop_exec(exe, &["--autostart"]);
+    format!(
+        "[Desktop Entry]\nType=Application\nVersion=1.0\nName=泥洞\nName[en]=Nidong\nComment=东北大学私人桌面看板\nExec={exec}\nIcon=nidong\nTerminal=false\nCategories=Utility;\nX-GNOME-Autostart-enabled=true\n"
+    )
+}
+
 fn apply_autostart(enable: bool) -> Result<()> {
     if cfg!(debug_assertions) {
         let _ = enable;
@@ -615,6 +799,37 @@ fn apply_autostart(enable: bool) -> Result<()> {
                 .status();
         }
     }
+    #[cfg(target_os = "linux")]
+    {
+        let config_dir = std::env::var("XDG_CONFIG_HOME")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var("HOME")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|h| PathBuf::from(h).join(".config"))
+            })
+            .ok_or_else(|| "找不到用户配置目录，无法设置开机自启".to_string())?;
+        let autostart_dir = config_dir.join("autostart");
+        let desktop_file = autostart_dir.join("edu.neu.nidong.desktop");
+        if enable {
+            fs::create_dir_all(&autostart_dir)?;
+            let exe = std::env::var("APPIMAGE")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| {
+                    std::env::current_exe()
+                        .ok()
+                        .map(|p| p.to_string_lossy().into_owned())
+                })
+                .ok_or_else(|| "无法读取程序路径，无法设置开机自启".to_string())?;
+            fs::write(&desktop_file, build_autostart_desktop(&exe))?;
+        } else if desktop_file.exists() {
+            let _ = fs::remove_file(&desktop_file);
+        }
+    }
     let _ = enable;
     Ok(())
 }
@@ -635,8 +850,13 @@ fn clamp_pos(win: &WebviewWindow, x: f64, y: f64) -> (f64, f64) {
     let ww = island_logical_width(win);
     if let Ok(Some(m)) = win.current_monitor() {
         let scale = m.scale_factor();
-        let origin = m.position();
-        let size = m.size();
+        #[cfg(target_os = "linux")]
+        let (origin, size) = {
+            let area = m.work_area();
+            (area.position, area.size)
+        };
+        #[cfg(not(target_os = "linux"))]
+        let (origin, size) = (*m.position(), *m.size());
         let mx = origin.x as f64 / scale;
         let my = origin.y as f64 / scale;
         let sw = size.width as f64 / scale;
@@ -657,11 +877,20 @@ fn place_window(win: &WebviewWindow, settings: &AppSettings) {
         return;
     }
     if let Ok(Some(m)) = win.current_monitor() {
-        let size = m.size();
         let scale = m.scale_factor();
-        let sw = size.width as f64 / scale;
-        let x = ((sw - 420.0) / 2.0).max(0.0);
-        let _ = win.set_position(LogicalPosition::new(x, 0.0));
+        #[cfg(target_os = "linux")]
+        let (mx, my, sw) = {
+            let area = m.work_area();
+            (
+                area.position.x as f64 / scale,
+                area.position.y as f64 / scale,
+                area.size.width as f64 / scale,
+            )
+        };
+        #[cfg(not(target_os = "linux"))]
+        let (mx, my, sw) = (0.0, 0.0, m.size().width as f64 / scale);
+        let x = mx + ((sw - 420.0) / 2.0).max(0.0);
+        let _ = win.set_position(LogicalPosition::new(x, my));
     }
 }
 
@@ -762,8 +991,9 @@ fn get_settings(state: State<AppState>) -> AppSettings {
 
 #[tauri::command]
 fn save_settings(app: AppHandle, state: State<AppState>, mut settings: AppSettings) -> Result<AppSettings> {
-    {
+    let island_toggled = {
         let mut g = state.settings.lock().unwrap();
+        let prev_show = g.show_island;
         settings.island_x = g.island_x;
         settings.island_y = g.island_y;
         if settings.last_username.is_empty() {
@@ -786,6 +1016,28 @@ fn save_settings(app: AppHandle, state: State<AppState>, mut settings: AppSettin
         crate::hotkey::update(&settings);
         apply_autostart(settings.autostart)?;
         *g = settings.clone();
+        prev_show != settings.show_island
+    };
+    if island_toggled {
+        let show = settings.show_island;
+        let settings_clone = settings.clone();
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(w) = app2.get_webview_window("main") {
+                if show {
+                    place_window(&w, &settings_clone);
+                    let _ = w.set_decorations(false);
+                    let _ = w.set_shadow(false);
+                    let _ = w.show();
+                    let _ = w.set_always_on_top(true);
+                    crate::hotkey::raise_noactivate(&w);
+                    let _ = app2.emit("island-reveal", ());
+                } else {
+                    crate::hotkey::set_hover_watch(false, 0, 0, 0, 0);
+                    let _ = w.hide();
+                }
+            }
+        });
     }
     save_settings_file(&state.data_dir, &settings);
     if let Some(sem) = load_semester(&state.data_dir) {
@@ -858,7 +1110,7 @@ fn mark_logged_in(state: &AppState, username: &str) {
     save_snapshot_file(&state.data_dir, &snap);
 }
 
-fn reveal_running_instance(app: &AppHandle) {
+fn reveal_island_only(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.set_decorations(false);
         let _ = w.set_shadow(false);
@@ -868,6 +1120,16 @@ fn reveal_running_instance(app: &AppHandle) {
         crate::hotkey::raise_noactivate(&w);
     }
     let _ = app.emit("island-reveal", ());
+}
+
+fn reveal_running_instance(app: &AppHandle) {
+    let show_island = app
+        .try_state::<AppState>()
+        .map(|s| s.settings.lock().unwrap().show_island)
+        .unwrap_or(true);
+    if show_island {
+        reveal_island_only(app);
+    }
     let _ = open_desk_window(app);
 }
 
@@ -1829,8 +2091,14 @@ pub fn run() {
     // 安装包又没有 Authenticode 签名。见 docs/给AI.md「自动更新」。
     evict_other_copies();
     let mut builder = tauri::Builder::default();
-    builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-        reveal_running_instance(app);
+    builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        if args.iter().any(|a| a == "--reveal") {
+            reveal_island_only(app);
+        } else if args.iter().any(|a| a == "--open") {
+            let _ = open_desk_window(app);
+        } else {
+            reveal_running_instance(app);
+        }
     }));
     builder = builder.plugin(tauri_plugin_opener::init());
     builder = builder.plugin(tauri_plugin_dialog::init());
@@ -1889,7 +2157,11 @@ pub fn run() {
             plugin::spawn_ticker(app.handle().clone());
 
             if let Some(win) = app.get_webview_window("main") {
-                place_window(&win, &settings);
+                if !settings.show_island {
+                    let _ = win.hide();
+                } else {
+                    place_window(&win, &settings);
+                }
                 crate::hotkey::clip_round(&win);
                 crate::hotkey::block_island_caption(&win);
                 let handle = app.handle().clone();
@@ -1971,12 +2243,36 @@ pub fn run() {
                 });
             }
 
+            let boot_args: Vec<String> = std::env::args().collect();
+            let started_by_autostart = boot_args.iter().any(|a| a == "--autostart");
+            let open_desk_at_boot = boot_args.iter().any(|a| a == "--open")
+                || (!settings.show_island && !started_by_autostart);
+            if open_desk_at_boot {
+                let _ = open_desk_window(app.handle());
+            }
+
             let snap_now = app.state::<AppState>().snapshot.lock().unwrap().clone();
             let open = MenuItem::with_id(app, "open", "打开窗口", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let reset = MenuItem::with_id(app, "reset", "复位岛", true, None::<&str>)?;
             let refresh = MenuItem::with_id(app, "refresh", "刷新", true, None::<&str>)?;
             let menu = Menu::new(app)?;
+            #[cfg(target_os = "linux")]
+            {
+                let (card_t, net_t, elec_t) = tray_labels(&snap_now);
+                let status_card = MenuItem::with_id(app, "status_card", card_t, false, None::<&str>)?;
+                let status_net = MenuItem::with_id(app, "status_net", net_t, false, None::<&str>)?;
+                let status_elec = MenuItem::with_id(app, "status_elec", elec_t, false, None::<&str>)?;
+                menu.append(&status_card)?;
+                menu.append(&status_net)?;
+                menu.append(&status_elec)?;
+                menu.append(&PredefinedMenuItem::separator(app)?)?;
+                app.manage(LinuxTrayStatus {
+                    card: status_card,
+                    net: status_net,
+                    elec: status_elec,
+                });
+            }
             menu.append(&open)?;
             menu.append(&refresh)?;
             menu.append(&reset)?;
@@ -1984,7 +2280,7 @@ pub fn run() {
             let mut tray = TrayIconBuilder::with_id("tray")
                 .menu(&menu)
                 .tooltip(tray_tip(&snap_now))
-                .show_menu_on_left_click(false)
+                .show_menu_on_left_click(cfg!(target_os = "linux"))
                 .on_tray_icon_event(|icon, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
@@ -2014,12 +2310,17 @@ pub fn run() {
                                 let _ = w.show();
                                 let _ = w.set_size(LogicalSize::new(420.0, 40.0));
                                 let mut s = state.settings.lock().unwrap();
+                                let was_hidden = !s.show_island;
+                                s.show_island = true;
                                 s.island_x = None;
                                 s.island_y = None;
                                 save_settings_file(&state.data_dir, &s);
                                 place_window(&w, &s);
                                 let _ = w.set_always_on_top(true);
                                 crate::hotkey::raise_noactivate(&w);
+                                if was_hidden {
+                                    let _ = app.emit("settings-updated", &*s);
+                                }
                             }
                         }
                         let _ = app.emit("island-reset", ());
@@ -2054,6 +2355,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             bootstrap,
+            platform_info,
+            desktop_notify,
             clock_now,
             get_settings,
             save_settings,
@@ -2265,5 +2568,28 @@ mod tests {
         assert!(missing.chars().count() <= 127);
         let long = compose_tray_tip(&"卡".repeat(80), &"网".repeat(80), "电费  1 度", None);
         assert_eq!(long.chars().count(), 127);
+    }
+
+    #[test]
+    fn linux_session_and_autostart_desktop_formatting() {
+        assert_eq!(
+            super::detect_linux_session(Some("wayland"), Some("wayland-0"), Some(":0")),
+            "wayland"
+        );
+        assert_eq!(
+            super::detect_linux_session(Some("x11"), None, Some(":0")),
+            "x11"
+        );
+        assert_eq!(
+            super::detect_linux_session(None, Some("wayland-0"), None),
+            "wayland"
+        );
+        assert_eq!(super::detect_linux_session(None, None, Some(":0")), "x11");
+        assert_eq!(super::detect_linux_session(None, None, None), "other");
+
+        let desktop = super::build_autostart_desktop("/opt/My Apps/nidong.AppImage");
+        assert!(desktop.contains("Exec=\"/opt/My Apps/nidong.AppImage\" --autostart"));
+        assert!(desktop.contains("Name=泥洞"));
+        assert!(desktop.contains("X-GNOME-Autostart-enabled=true"));
     }
 }

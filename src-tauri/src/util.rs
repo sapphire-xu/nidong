@@ -75,6 +75,8 @@ pub fn is_offline_err(s: &str) -> bool {
         || t.contains("network is unreachable")
         || t.contains("no route to host")
         || t.contains("name or service not known")
+        || t.contains("temporary failure in name resolution")
+        || t.contains("could not resolve")
         || t.contains("failed to lookup")
         || t.contains("dns error")
         || t.contains("connectex")
@@ -170,6 +172,187 @@ fn system_proxy_url(server: &str) -> Option<String> {
     }
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesktopProxy {
+    pub enabled: bool,
+    pub http: Option<String>,
+    pub https: Option<String>,
+    pub socks: Option<String>,
+    pub bypass: Vec<String>,
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn parse_gnome_string(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    let inner = t
+        .strip_prefix('\'')
+        .and_then(|s| s.strip_suffix('\''))
+        .unwrap_or(t)
+        .trim();
+    if inner.is_empty() {
+        None
+    } else {
+        Some(inner.to_string())
+    }
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn parse_gnome_ignore_hosts(raw: &str) -> Vec<String> {
+    let t = raw.trim();
+    let inner = t
+        .strip_prefix("@as")
+        .map(str::trim)
+        .unwrap_or(t)
+        .trim_start_matches('[')
+        .trim_end_matches(']');
+    inner
+        .split(',')
+        .filter_map(|item| parse_gnome_string(item))
+        .collect()
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn format_host_port(host: Option<String>, port: Option<u16>, scheme: &str) -> Option<String> {
+    let host = host?;
+    let port = port.filter(|p| *p > 0)?;
+    if host.contains("://") {
+        Some(host)
+    } else {
+        Some(format!("{scheme}://{host}:{port}"))
+    }
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn parse_kde_kioslaverc(content: &str) -> DesktopProxy {
+    let mut in_section = false;
+    let mut proxy_type = 0u8;
+    let mut http = None;
+    let mut https = None;
+    let mut socks = None;
+    let mut bypass = Vec::new();
+    for raw in content.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            in_section = line.eq_ignore_ascii_case("[Proxy Settings]");
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        let k = k.trim();
+        let v = v.trim();
+        match k {
+            "ProxyType" => proxy_type = v.parse().unwrap_or(0),
+            "httpProxy" if !v.is_empty() => http = Some(normalize_kde_proxy(v, "http")),
+            "httpsProxy" if !v.is_empty() => https = Some(normalize_kde_proxy(v, "http")),
+            "socksProxy" if !v.is_empty() => socks = Some(normalize_kde_proxy(v, "socks5")),
+            "NoProxyFor" => {
+                bypass = v
+                    .split([',', ';'])
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+            _ => {}
+        }
+    }
+    if proxy_type != 1 {
+        return DesktopProxy::default();
+    }
+    DesktopProxy {
+        enabled: http.is_some() || https.is_some() || socks.is_some(),
+        http,
+        https,
+        socks,
+        bypass,
+    }
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn normalize_kde_proxy(raw: &str, default_scheme: &str) -> String {
+    let mut parts = raw.split_whitespace();
+    let first = parts.next().unwrap_or("").trim();
+    if let Some(port) = parts.next().map(str::trim).filter(|p| !p.is_empty()) {
+        if first.contains("://") {
+            format!("{}:{port}", first.trim_end_matches('/'))
+        } else {
+            format!("{default_scheme}://{first}:{port}")
+        }
+    } else if first.contains("://") {
+        first.to_string()
+    } else {
+        format!("{default_scheme}://{first}")
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn gsettings_get(schema: &str, key: &str) -> Option<String> {
+    let out = std::process::Command::new("gsettings")
+        .args(["get", schema, key])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+#[cfg(target_os = "linux")]
+pub fn linux_desktop_proxy() -> DesktopProxy {
+    if let Some(mode) = gsettings_get("org.gnome.system.proxy", "mode") {
+        if parse_gnome_string(&mode).as_deref() == Some("manual") {
+            let read_ep = |sub: &str, scheme: &str| {
+                let schema = format!("org.gnome.system.proxy.{sub}");
+                let host = gsettings_get(&schema, "host").and_then(|s| parse_gnome_string(&s));
+                let port = gsettings_get(&schema, "port").and_then(|s| s.trim().parse::<u16>().ok());
+                format_host_port(host, port, scheme)
+            };
+            let http = read_ep("http", "http");
+            let https = read_ep("https", "http");
+            let socks = read_ep("socks", "socks5");
+            let bypass = gsettings_get("org.gnome.system.proxy", "ignore-hosts")
+                .map(|s| parse_gnome_ignore_hosts(&s))
+                .unwrap_or_default();
+            if http.is_some() || https.is_some() || socks.is_some() {
+                return DesktopProxy {
+                    enabled: true,
+                    http,
+                    https,
+                    socks,
+                    bypass,
+                };
+            }
+        }
+    }
+    let kde_path = std::env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .map(|h| std::path::PathBuf::from(h).join(".config"))
+        })
+        .map(|d| d.join("kioslaverc"));
+    if let Some(path) = kde_path {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            let kde = parse_kde_kioslaverc(&text);
+            if kde.enabled {
+                return kde;
+            }
+        }
+    }
+    DesktopProxy::default()
+}
+
 pub fn detect_proxy() -> Option<String> {
     let mut env_values = Vec::new();
     for k in [
@@ -184,7 +367,17 @@ pub fn detect_proxy() -> Option<String> {
             env_values.push(v);
         }
     }
+    #[cfg(windows)]
     let (system_on, server) = windows_proxy_setting();
+    #[cfg(target_os = "linux")]
+    let (system_on, server) = {
+        let dp = linux_desktop_proxy();
+        let srv = dp.https.or(dp.http);
+        let has_env = env_values.iter().any(|v| !v.trim().is_empty());
+        (dp.enabled || has_env, srv)
+    };
+    #[cfg(not(any(windows, target_os = "linux")))]
+    let (system_on, server): (bool, Option<String>) = (true, None);
     let candidates = assemble_proxy_candidates(env_values, allow_proxy_fallback(system_on), server.as_deref());
     for p in candidates {
         if proxy_reachable(&p) {
@@ -196,11 +389,11 @@ pub fn detect_proxy() -> Option<String> {
 }
 
 fn allow_proxy_fallback(system_on: bool) -> bool {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     {
         system_on
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = system_on;
         true
@@ -213,11 +406,6 @@ fn windows_proxy_setting() -> (bool, Option<String>) {
         return (false, None);
     }
     (true, windows_proxy_server())
-}
-
-#[cfg(not(windows))]
-fn windows_proxy_setting() -> (bool, Option<String>) {
-    (false, None)
 }
 
 #[cfg(windows)]
@@ -484,5 +672,29 @@ mod tests {
         let html = r#"<span id="ContentPlaceHolder1_txtOddFare" class="red">376.07 元</span>"#;
         let v = input_id_value(html, "ContentPlaceHolder1_txtOddFare").unwrap();
         assert_eq!(parse_money(&v), 376.07);
+    }
+
+    #[test]
+    fn parses_gnome_and_kde_proxy_configs() {
+        assert_eq!(super::parse_gnome_string("'manual'").as_deref(), Some("manual"));
+        assert_eq!(super::parse_gnome_string("''"), None);
+        assert_eq!(
+            super::parse_gnome_ignore_hosts("['localhost', '127.0.0.0/8', '::1']"),
+            vec!["localhost", "127.0.0.0/8", "::1"]
+        );
+        assert!(super::parse_gnome_ignore_hosts("@as []").is_empty());
+        assert_eq!(
+            super::format_host_port(Some("127.0.0.1".into()), Some(7890), "http").as_deref(),
+            Some("http://127.0.0.1:7890")
+        );
+        let kde = super::parse_kde_kioslaverc(
+            "[Proxy Settings]\nProxyType=1\nhttpProxy=http://127.0.0.1 7897\nhttpsProxy=127.0.0.1:7897\nNoProxyFor=localhost,127.0.0.1\n",
+        );
+        assert!(kde.enabled);
+        assert_eq!(kde.http.as_deref(), Some("http://127.0.0.1:7897"));
+        assert_eq!(kde.https.as_deref(), Some("http://127.0.0.1:7897"));
+        assert_eq!(kde.bypass, vec!["localhost", "127.0.0.1"]);
+        let kde_off = super::parse_kde_kioslaverc("[Proxy Settings]\nProxyType=0\nhttpProxy=127.0.0.1:7897\n");
+        assert!(!kde_off.enabled);
     }
 }

@@ -45,25 +45,36 @@ pub struct Ledger {
     pub days: Vec<Day>,
 }
 
-#[repr(C)]
-struct SystemTime {
-    year: u16,
-    month: u16,
-    dow: u16,
-    day: u16,
-    hour: u16,
-    min: u16,
-    sec: u16,
-    ms: u16,
-}
-
-extern "system" {
-    fn GetLocalTime(out: *mut SystemTime);
-}
+use chrono::{Datelike, Local, Timelike};
 
 pub fn app_dir() -> PathBuf {
-    let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
-    PathBuf::from(base).join("edu.neu.nidong")
+    #[cfg(windows)]
+    {
+        let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
+        PathBuf::from(base).join("edu.neu.nidong")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let base = std::env::var("HOME")
+            .map(|h| PathBuf::from(h).join("Library/Application Support"))
+            .unwrap_or_else(|_| PathBuf::from("."));
+        base.join("edu.neu.nidong")
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let base = std::env::var("XDG_DATA_HOME")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var("HOME")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|h| PathBuf::from(h).join(".local/share"))
+            })
+            .unwrap_or_else(|| PathBuf::from("."));
+        base.join("edu.neu.nidong")
+    }
 }
 
 pub fn meter_dir() -> PathBuf {
@@ -71,23 +82,14 @@ pub fn meter_dir() -> PathBuf {
 }
 
 pub fn now_parts() -> (String, String, bool) {
-    let mut t = SystemTime {
-        year: 0,
-        month: 0,
-        dow: 0,
-        day: 0,
-        hour: 0,
-        min: 0,
-        sec: 0,
-        ms: 0,
-    };
-    unsafe { GetLocalTime(&mut t) };
-    let month = format!("{:04}-{:02}", t.year, t.month);
-    let day = format!("{:04}-{:02}-{:02}", t.year, t.month, t.day);
-    (month, day, t.hour < 6)
+    let t = Local::now();
+    let month = format!("{:04}-{:02}", t.year(), t.month());
+    let day = format!("{:04}-{:02}-{:02}", t.year(), t.month(), t.day());
+    (month, day, t.hour() < 6)
 }
 
 impl Ledger {
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub fn add(&mut self, day: &str, delta: Totals) {
         if delta.is_zero() {
             return;
@@ -179,6 +181,7 @@ pub fn save_ledger(path: &Path, ledger: &Ledger) -> std::io::Result<()> {
     Ok(())
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn archive_if_needed(path: &Path, ledger: Ledger, month_now: &str) -> Ledger {
     if ledger.month.is_empty() {
         let mut fresh = Ledger::default();

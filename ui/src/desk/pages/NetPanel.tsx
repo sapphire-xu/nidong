@@ -235,10 +235,19 @@ export function NetPanel(props: { portalBytes?: number; portalKnown: boolean }) 
   }
 
   const enabled = status.enabled;
+  const supported = status.supported !== false;
 
   return (
     <div className={motion}>
-      {view === "rules" ? (
+      {!supported ? (
+        <article className="net-doc">
+          <p className="net-portal">校园网记录的流量 {props.portalKnown && props.portalBytes != null ? formatBytes(props.portalBytes) : "—"}</p>
+          <p className="hint">本机流量记录暂仅支持 Windows，Linux 版本开发中。当前仍可在主页和上方查看校园网门户记录的本月已用流量。</p>
+          <hr className="net-split" />
+          <h3>网费计费规则</h3>
+          <NetDoc />
+        </article>
+      ) : view === "rules" ? (
         <div className="net-doc">
           <div className="net-log-bar">
             <Button appearance="secondary" onClick={back}>返回</Button>

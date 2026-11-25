@@ -144,6 +144,19 @@ export type AppSettings = {
   smartMuteIdleMinutes?: number;
   smartMuteClass?: boolean;
   smartMuteAgenda?: boolean;
+  showIsland?: boolean;
+  navCollapsed?: boolean;
+  navOrder?: string[];
+  navPins?: string[];
+};
+
+export type PlatformInfo = {
+  os: string;
+  session: string;
+  meterSupported: boolean;
+  islandPositionable: boolean;
+  autoUpdateSupported: boolean;
+  desktopNotifySupported: boolean;
 };
 
 export type SavedCreds = {

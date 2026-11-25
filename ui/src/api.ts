@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Agenda, AppSettings, LoginOutcome, SavedCreds, Snapshot } from "./types";
+import type { Agenda, AppSettings, LoginOutcome, PlatformInfo, SavedCreds, Snapshot } from "./types";
 
 export const api = {
   bootstrap: () => invoke<Snapshot>("bootstrap"),
+  platformInfo: () => invoke<PlatformInfo>("platform_info"),
+  desktopNotify: (title: string, body: string) => invoke<void>("desktop_notify", { title, body }),
   clockNow: () => invoke<{ iso: string; overridden: boolean }>("clock_now"),
   settings: () => invoke<AppSettings>("get_settings"),
   saveSettings: (settings: AppSettings) => invoke<AppSettings>("save_settings", { settings }),
@@ -147,6 +149,7 @@ export type MeterTotals = {
 };
 
 export type MeterStatus = {
+  supported?: boolean;
   enabled: boolean;
   running: boolean;
   onCampus: boolean;

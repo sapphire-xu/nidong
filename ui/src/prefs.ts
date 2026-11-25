@@ -2,6 +2,20 @@ import type { AppSettings } from "./types";
 
 const WIFI_MODES = ["off", "offline", "boot", "hotspot", "manual"] as const;
 
+function cleanStringList(list: string[] | undefined): string[] {
+  if (!Array.isArray(list)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of list) {
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
 export function withSettingDefaults(s: AppSettings): AppSettings {
   const mode = WIFI_MODES.find((m) => m === s.campusWifiMode) || "off";
   return {
@@ -23,6 +37,10 @@ export function withSettingDefaults(s: AppSettings): AppSettings {
     smartMuteIdleMinutes: clampIdleMinutes(s.smartMuteIdleMinutes),
     smartMuteClass: s.smartMuteClass === true,
     smartMuteAgenda: s.smartMuteAgenda === true,
+    showIsland: s.showIsland !== false,
+    navCollapsed: s.navCollapsed === true,
+    navOrder: cleanStringList(s.navOrder),
+    navPins: cleanStringList(s.navPins),
   };
 }
 

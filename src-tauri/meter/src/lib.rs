@@ -1,23 +1,39 @@
 //! 泥洞本机流量记录。界面在泥洞里，计数在这个提权进程里。
 
+#[cfg(windows)]
 mod netif;
+#[cfg(windows)]
 mod place;
+#[cfg(windows)]
 mod run;
+#[cfg(windows)]
 mod sample;
 mod store;
+#[cfg(windows)]
 mod task;
+#[cfg(windows)]
 mod udp;
 
 use serde::Serialize;
 
 use store::Totals;
 
+#[cfg(windows)]
 pub use place::connected_ssid;
+#[cfg(not(windows))]
+pub fn connected_ssid() -> String {
+    String::new()
+}
 pub use store::Day;
+
+pub fn is_supported() -> bool {
+    cfg!(windows)
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
+    pub supported: bool,
     pub enabled: bool,
     pub running: bool,
     pub on_campus: bool,
@@ -42,10 +58,15 @@ pub struct Status {
     pub error: String,
 }
 
+#[cfg(windows)]
 pub fn entry() {
     run::entry();
 }
 
+#[cfg(not(windows))]
+pub fn entry() {}
+
+#[cfg(windows)]
 pub fn status() -> Status {
     let enabled = run::enabled_file();
     let live = run::read_live();
@@ -64,6 +85,7 @@ pub fn status() -> Status {
     };
     match live {
         Some(live) if running => Status {
+            supported: true,
             enabled,
             running,
             on_campus: live.on_campus,
@@ -88,6 +110,7 @@ pub fn status() -> Status {
             error,
         },
         _ => Status {
+            supported: true,
             enabled,
             running: false,
             on_campus: false,
@@ -111,6 +134,37 @@ pub fn status() -> Status {
             month: month_tot,
             error,
         },
+    }
+}
+
+#[cfg(not(windows))]
+pub fn status() -> Status {
+    let (month, today, night) = store::now_parts();
+    let (today_tot, month_tot) = store::summary(&month, &today);
+    Status {
+        supported: false,
+        enabled: false,
+        running: false,
+        on_campus: false,
+        ipv4: String::new(),
+        ipv6: String::new(),
+        v4_down_bps: 0,
+        v6_down_bps: 0,
+        v4_down_tcp_bps: 0,
+        v4_down_udp_bps: 0,
+        v4_down_campus_bps: 0,
+        v6_down_tcp_bps: 0,
+        v6_down_udp_bps: 0,
+        v6_down_campus_bps: 0,
+        v4_up_bps: 0,
+        v6_up_bps: 0,
+        night,
+        elevated: false,
+        udp_ready: false,
+        udp_gap: false,
+        today: today_tot,
+        month: month_tot,
+        error: String::new(),
     }
 }
 

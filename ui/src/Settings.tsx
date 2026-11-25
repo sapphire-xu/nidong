@@ -27,6 +27,7 @@ import {
 } from "@fluentui/react-icons";
 import type { AppSettings, SemesterTable } from "./types";
 import { api } from "./api";
+import { usePlatformInfo } from "./platform";
 import { Threshold } from "./Threshold";
 
 const ROOM_LOOKUP = "https://hqglc.neu.edu.cn/2021/1020/c2465a204768/page.htm";
@@ -123,8 +124,9 @@ function YmdField({ value, onChange }: { value: string; onChange: (v: string) =>
   );
 }
 
-function HotkeyField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function HotkeyField({ value, onChange, isLinux }: { value: string; onChange: (v: string) => void; isLinux: boolean }) {
   const [capturing, setCapturing] = useState(false);
+  const metaName = isLinux ? "Super" : "Win";
   useEffect(() => {
     if (!capturing) return;
     const held = new Set<string>();
@@ -132,7 +134,7 @@ function HotkeyField({ value, onChange }: { value: string; onChange: (v: string)
       if (e.key === "Control") return "Ctrl";
       if (e.key === "Alt") return "Alt";
       if (e.key === "Shift") return "Shift";
-      if (e.key === "Meta") return "Win";
+      if (e.key === "Meta") return metaName;
       if (e.key === "Tab") return "Tab";
       if (e.key === " ") return "Space";
       if (e.key === "Escape") return "Esc";
@@ -148,11 +150,12 @@ function HotkeyField({ value, onChange }: { value: string; onChange: (v: string)
         return;
       }
       held.add(label(e));
-      const parts = ["Ctrl", "Alt", "Shift", "Win", "Tab"].filter((k) => held.has(k));
+      const mods = ["Ctrl", "Alt", "Shift", "Win", "Super", "Tab"];
+      const parts = mods.filter((k) => held.has(k));
       for (const k of held) {
         if (!parts.includes(k)) parts.push(k);
       }
-      const main = parts.filter((k) => !["Ctrl", "Alt", "Shift", "Win", "Tab"].includes(k));
+      const main = parts.filter((k) => !mods.includes(k));
       if (parts.length >= 2 && main.length >= 1) {
         onChange(parts.join("+"));
         setCapturing(false);
@@ -167,11 +170,16 @@ function HotkeyField({ value, onChange }: { value: string; onChange: (v: string)
       window.removeEventListener("keydown", down, true);
       window.removeEventListener("keyup", up, true);
     };
-  }, [capturing, onChange]);
+  }, [capturing, onChange, metaName]);
+
+  const shown = (value || "Ctrl+Q")
+    .split("+")
+    .map((p) => (isLinux && p.trim().toLowerCase() === "win" ? "Super" : p.trim()))
+    .join(" + ");
 
   return (
     <Button appearance={capturing ? "primary" : "secondary"} onClick={() => setCapturing((v) => !v)}>
-      {capturing ? "按下组合键…" : (value || "Ctrl+Q").replace(/\+/g, " + ")}
+      {capturing ? "按下组合键…" : shown}
     </Button>
   );
 }
@@ -192,6 +200,9 @@ export function SettingsPanel(props: {
   start?: "hub" | "dorm";
 }) {
   const { settings, setSettings, semester, cacheLabel, courseSync, courseSyncErr, offline, onSync, onLogout, onPreviewRemind, loggedIn, onRequestLogin } = props;
+  const platform = usePlatformInfo();
+  const isLinux = platform.os === "linux";
+  const isWayland = isLinux && platform.session === "wayland";
   const [page, setPage] = useState<Page>(props.start === "dorm" ? "dorm" : "hub");
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [motion, setMotion] = useState<"idle" | "back">("idle");
@@ -344,31 +355,52 @@ export function SettingsPanel(props: {
 
       {page === "panel" && (
         <div key={page} className="stack settings-sub-content">
-          <p className="hint">折叠后可以再藏进屏幕上沿。上课提醒仍会弹出，不受隐藏影响。独占全屏游戏时会自动藏起；游戏开无边框窗口化，岛才能继续置顶。</p>
-          <Switch label="自动隐藏" checked={!!s.autoHide} onChange={(_, d) => set({ autoHide: d.checked })} />
-          {s.autoHide ? (
+          {isLinux ? (
             <>
-              <p className="hint">岛露出来后再过 3 秒，向上收起。</p>
-              <Switch label="快捷键唤出" checked={!!s.autoHideHotkey} onChange={(_, d) => set({ autoHideHotkey: d.checked })} />
-              {s.autoHideHotkey ? (
-                <>
-                  <div className="row-between">
-                    <span>组合键</span>
-                    <HotkeyField value={s.revealHotkey || "Ctrl+Q"} onChange={(revealHotkey) => set({ revealHotkey })} />
-                  </div>
-                  <p className="hint">两键要在约 0.4 秒内一起按下。只把岛叫出来，松开不收起，也不打开窗口。</p>
-                </>
-              ) : null}
-              <Switch label="悬停唤出" checked={!!s.autoHideHover} onChange={(_, d) => set({ autoHideHover: d.checked })} />
-              {s.autoHideHover ? (
-                <p className="hint">鼠标移到岛原来的位置附近，停超过 1 秒，只把岛叫出来，不打开窗口。</p>
-              ) : (
-                <p className="hint">关掉后，用快捷键把岛叫出来，或用托盘「打开窗口」。</p>
-              )}
+              <Switch label="显示悬浮岛" checked={s.showIsland !== false} onChange={(_, d) => set({ showIsland: d.checked })} />
+              <p className="hint">
+                {s.showIsland === false
+                  ? "当前为仅托盘模式，可从系统托盘打开窗口；上课和日程提醒会通过系统通知弹出。"
+                  : isWayland
+                    ? "Wayland（如 Ubuntu GNOME）限制应用自行置顶贴顶、悬停唤出和全局键盘钩子；上课与日程提醒会同步发送系统通知，你也可以在系统快捷键里绑定 nidong --reveal 或 nidong --open。"
+                    : "拖动岛可自由调整位置；关闭后进入仅托盘模式，提醒改走系统通知。"}
+              </p>
             </>
           ) : (
-            <p className="hint">打开后，岛会在无人使用时收进屏幕上沿。</p>
+            <p className="hint">折叠后可以再藏进屏幕上沿。上课提醒仍会弹出，不受隐藏影响。独占全屏游戏时会自动藏起；游戏开无边框窗口化，岛才能继续置顶。</p>
           )}
+          {s.showIsland !== false ? (
+            <>
+              <Switch label="自动隐藏" checked={!!s.autoHide} onChange={(_, d) => set({ autoHide: d.checked })} />
+              {s.autoHide ? (
+                <>
+                  <p className="hint">岛露出来后再过 3 秒，向上收起。</p>
+                  {!isWayland ? (
+                    <>
+                      <Switch label="快捷键唤出" checked={!!s.autoHideHotkey} onChange={(_, d) => set({ autoHideHotkey: d.checked })} />
+                      {s.autoHideHotkey ? (
+                        <>
+                          <div className="row-between">
+                            <span>组合键</span>
+                            <HotkeyField value={s.revealHotkey || "Ctrl+Q"} isLinux={isLinux} onChange={(revealHotkey) => set({ revealHotkey })} />
+                          </div>
+                          <p className="hint">两键要在约 0.4 秒内一起按下。只把岛叫出来，松开不收起，也不打开窗口。</p>
+                        </>
+                      ) : null}
+                      <Switch label="悬停唤出" checked={!!s.autoHideHover} onChange={(_, d) => set({ autoHideHover: d.checked })} />
+                      {s.autoHideHover ? (
+                        <p className="hint">鼠标移到岛原来的位置附近，停超过 1 秒，只把岛叫出来，不打开窗口。</p>
+                      ) : (
+                        <p className="hint">关掉后，用快捷键把岛叫出来，或用托盘「打开窗口」。</p>
+                      )}
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                <p className="hint">打开后，岛会在无人使用时收进屏幕上沿。</p>
+              )}
+            </>
+          ) : null}
         </div>
       )}
 

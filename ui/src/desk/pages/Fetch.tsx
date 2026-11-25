@@ -2,6 +2,7 @@ import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState } from "react";
 import { api, type FetchFile, type FetchStatus } from "../../api";
+import { usePlatformInfo } from "../../platform";
 
 function message(error: unknown) {
   return String(error).replace(/^Error: /, "");
@@ -70,6 +71,7 @@ function proxyHint(status: FetchStatus | null, useProxy: boolean) {
 }
 
 export function FetchPanel() {
+  const platform = usePlatformInfo();
   const [status, setStatus] = useState<FetchStatus | null>(null);
   const [urls, setUrls] = useState("");
   const [time, setTime] = useState("00:00");
@@ -237,7 +239,11 @@ export function FetchPanel() {
             <DialogContent className="safety-copy">
               <p>夜里如果因没电电脑关机，会停在已经落盘的进度。过了6点不会自动接着下。</p>
               <p>Steam的游戏下载不经过泥洞。若要实现Steam定时下载，在Steam的设置→下载里，可以把自动更新限制在0:00-6:00，并保持电脑和Steam开启。此方法也不能让Steam下载结束后关机。</p>
-              <p>打开「使用系统代理」后，走Windows当前的代理，常见是127.0.0.1上的端口。开了TUN或WARP时，无论打开与否效果一样。如果你不了解这些，可以忽略。</p>
+              <p>
+                {platform.os === "linux"
+                  ? "打开「使用系统代理」后，走系统当前的代理（桌面系统代理或 HTTP_PROXY 环境变量），常见是 127.0.0.1 上的端口。开了 TUN 或 WARP 时，无论打开与否效果一样。如果你不了解这些，可以忽略。"
+                  : "打开「使用系统代理」后，走Windows当前的代理，常见是127.0.0.1上的端口。开了TUN或WARP时，无论打开与否效果一样。如果你不了解这些，可以忽略。"}
+              </p>
             </DialogContent>
             <DialogActions>
               <Button appearance="primary" onClick={() => setHelp(false)}>知道了</Button>

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "nidong",
+  "mainBinaryName": "nidong",
+  "build": {
+    "beforeBundleCommand": null
+  },
+  "bundle": {
+    "targets": ["deb", "appimage"],
+    "externalBin": null,
+    "createUpdaterArtifacts": false,
+    "category": "Utility",
+    "shortDescription": "东北大学私人桌面看板",
+    "linux": {
+      "deb": {
+        "desktopTemplate": "linux/nidong.desktop.hbs"
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    }
+  }
+}

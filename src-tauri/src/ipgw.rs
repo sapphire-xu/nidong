@@ -197,6 +197,10 @@ fn cert_failure(err: &str) -> bool {
         || low.contains("unknownissuer")
         || low.contains("notvalidforname")
         || low.contains("invalid peer")
+        || low.contains("verify failed")
+        || low.contains("self-signed")
+        || low.contains("self signed")
+        || low.contains("unknown ca")
 }
 
 fn ticket_from_school(url: &str) -> Option<String> {

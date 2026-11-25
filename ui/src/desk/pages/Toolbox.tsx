@@ -1,10 +1,34 @@
-import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Dropdown, Field, Input, Option, Switch } from "@fluentui/react-components";
-import { ArrowDownload20Regular, PlugConnected20Regular, Share20Regular, SpeakerMute20Regular, Wifi120Regular } from "@fluentui/react-icons";
-import { useEffect, useRef, useState } from "react";
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+  Dropdown,
+  Field,
+  Input,
+  Option,
+  Switch,
+  Tooltip,
+} from "@fluentui/react-components";
+import {
+  ArrowDownload20Regular,
+  Pin16Filled,
+  Pin16Regular,
+  PinOff16Regular,
+  PlugConnected20Regular,
+  Share20Regular,
+  SpeakerMute20Regular,
+  Wifi120Regular,
+} from "@fluentui/react-icons";
+import { useState } from "react";
 import { api, type PluginInfo } from "../../api";
 import { clampIdleMinutes } from "../../prefs";
 import type { AppSettings } from "../../types";
 import { Threshold } from "../../Threshold";
+import { toolNavIdFromSubPage, type ToolNavId, type ToolSubPage } from "../navModel";
 import { FetchPanel } from "./Fetch";
 import { PluginManagerPanel, PluginView } from "./Plugins";
 import { SharePanel } from "./Share";
@@ -29,45 +53,47 @@ function isCampusNet(name: string, configured: string) {
   return sameNet(name, configured) || CAMPUS_NETS.some((n) => sameNet(name, n));
 }
 
-type ToolSubPage = "hub" | "campus" | "share" | "mute" | "fetch" | "plugins" | `plugin:${string}`;
+const BUILTIN_TILES: { key: "campus" | "share" | "mute" | "fetch"; label: string; icon: JSX.Element }[] = [
+  { key: "campus", label: "校园网自动登录", icon: <Wifi120Regular /> },
+  { key: "share", label: "免流文件分享", icon: <Share20Regular /> },
+  { key: "mute", label: "防社死设置", icon: <SpeakerMute20Regular /> },
+  { key: "fetch", label: "定时下载", icon: <ArrowDownload20Regular /> },
+];
 
 export function Toolbox(props: {
   settings: AppSettings;
   setSettings: (s: AppSettings) => void;
-  openShare?: number;
+  subPage: ToolSubPage;
+  subMotion: "none" | "in" | "back";
+  onOpenSubPage: (next: ToolSubPage) => void;
+  pinnedNavIds: readonly ToolNavId[];
+  onTogglePin: (toolId: ToolNavId) => void;
   plugins: PluginInfo[];
   theme: "light" | "dark";
-  onActivePlugin?: (id: string | null) => void;
 }) {
-  const { settings, setSettings, openShare, plugins, theme, onActivePlugin } = props;
-  const [page, setPage] = useState<ToolSubPage>(openShare ? "share" : "hub");
-  const [motion, setMotion] = useState<"idle" | "back">("idle");
-  const sharePanelRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!openShare) return;
-    setMotion("idle");
-    setPage("share");
-    const el = sharePanelRef.current;
-    if (!el) return;
-    el.classList.remove("settings-sub-content");
-    void el.offsetWidth;
-    el.classList.add("settings-sub-content");
-  }, [openShare]);
+  const {
+    settings,
+    setSettings,
+    subPage: page,
+    subMotion,
+    onOpenSubPage,
+    pinnedNavIds,
+    onTogglePin,
+    plugins,
+    theme,
+  } = props;
   const openPage = (next: ToolSubPage) => {
-    setMotion(next === "hub" && page !== "hub" ? "back" : "idle");
-    setPage(next);
+    onOpenSubPage(next);
   };
-  useEffect(() => {
-    const activeId = page.startsWith("plugin:") ? page.slice("plugin:".length) : null;
-    onActivePlugin?.(activeId);
-    return () => {
-      onActivePlugin?.(null);
-    };
-  }, [page, onActivePlugin]);
   const activePlugin = page.startsWith("plugin:")
     ? plugins.find((p) => p.manifest.id === page.slice("plugin:".length))
     : undefined;
   const uiPlugins = plugins.filter((p) => p.enabled && p.hasUi);
+  const pinnedSet = new Set<string>(pinnedNavIds);
+  const currentPinId = toolNavIdFromSubPage(page);
+  const currentPinned = currentPinId ? pinnedSet.has(currentPinId) : false;
+  const subMotionClass = subMotion === "in" ? " settings-sub-content" : "";
+  const hubMotionClass = subMotion === "back" ? " settings-hub-content" : "";
   const subTitle =
     page === "campus"
       ? "校园网自动登录"
@@ -122,47 +148,96 @@ export function Toolbox(props: {
             </Button>
           </>
         ) : (
-          <div className="settings-breadcrumb">
-            <button type="button" className="settings-breadcrumb-link" onClick={() => openPage("hub")}>工具箱</button>
-            <span aria-hidden="true">›</span>
-            <h1 className="page-title">{subTitle}</h1>
-          </div>
+          <>
+            <div className="settings-breadcrumb">
+              <button type="button" className="settings-breadcrumb-link" onClick={() => openPage("hub")}>工具箱</button>
+              <span aria-hidden="true">›</span>
+              <h1 className="page-title">{subTitle}</h1>
+            </div>
+            {currentPinId ? (
+              <Button
+                appearance="subtle"
+                className={currentPinned ? "tool-header-pin pinned" : "tool-header-pin"}
+                icon={currentPinned ? <PinOff16Regular /> : <Pin16Regular />}
+                onClick={() => onTogglePin(currentPinId)}
+              >
+                {currentPinned ? "取消固定" : "固定到导航栏"}
+              </Button>
+            ) : null}
+          </>
         )}
       </div>
       {page === "hub" ? (
-        <div className={`tool-grid${motion === "back" ? " settings-hub-content" : ""}`}>
-          <button type="button" className="tool-tile on" onClick={() => openPage("campus")}>
-            <span className="tool-ico" aria-hidden="true"><Wifi120Regular /></span>
-            <span className="tool-name">校园网自动登录</span>
-          </button>
-          <button type="button" className="tool-tile on" onClick={() => openPage("share")}>
-            <span className="tool-ico" aria-hidden="true"><Share20Regular /></span>
-            <span className="tool-name">免流文件分享</span>
-          </button>
-          <button type="button" className="tool-tile on" onClick={() => openPage("mute")}>
-            <span className="tool-ico" aria-hidden="true"><SpeakerMute20Regular /></span>
-            <span className="tool-name">防社死设置</span>
-          </button>
-          <button type="button" className="tool-tile on" onClick={() => openPage("fetch")}>
-            <span className="tool-ico" aria-hidden="true"><ArrowDownload20Regular /></span>
-            <span className="tool-name">定时下载</span>
-          </button>
-          {uiPlugins.map((p) => (
-            <button
-              key={p.manifest.id}
-              type="button"
-              className="tool-tile on"
-              onClick={() => openPage(`plugin:${p.manifest.id}`)}
-            >
-              <span className="tool-ico" aria-hidden="true"><PlugConnected20Regular /></span>
-              <span className="tool-name">{p.manifest.name}</span>
-              {p.statusBadge ? <span className="tool-badge">{p.statusBadge}</span> : null}
-            </button>
-          ))}
+        <div className={`tool-grid${hubMotionClass}`}>
+          {BUILTIN_TILES.map((tile) => {
+            const pinId = `tool:${tile.key}` as ToolNavId;
+            const pinned = pinnedSet.has(pinId);
+            return (
+              <div key={tile.key} className={`tool-tile-wrap${pinned ? " is-pinned" : ""}`}>
+                <button type="button" className="tool-tile on" onClick={() => openPage(tile.key)}>
+                  <span className="tool-ico" aria-hidden="true">{tile.icon}</span>
+                  <span className="tool-name">{tile.label}</span>
+                </button>
+                <Tooltip
+                  content={pinned ? "取消固定到左侧导航栏" : "固定到左侧导航栏"}
+                  relationship="label"
+                  withArrow
+                >
+                  <button
+                    type="button"
+                    className={`tool-pin-btn${pinned ? " pinned" : ""}`}
+                    aria-pressed={pinned}
+                    aria-label={pinned ? `取消固定${tile.label}` : `将${tile.label}固定到左侧导航栏`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTogglePin(pinId);
+                    }}
+                  >
+                    {pinned ? <Pin16Filled /> : <Pin16Regular />}
+                  </button>
+                </Tooltip>
+              </div>
+            );
+          })}
+          {uiPlugins.map((p) => {
+            const pinId = `tool:plugin:${p.manifest.id}` as ToolNavId;
+            const pinned = pinnedSet.has(pinId);
+            return (
+              <div key={p.manifest.id} className={`tool-tile-wrap${pinned ? " is-pinned" : ""}`}>
+                <button
+                  type="button"
+                  className="tool-tile on"
+                  onClick={() => openPage(`plugin:${p.manifest.id}`)}
+                >
+                  <span className="tool-ico" aria-hidden="true"><PlugConnected20Regular /></span>
+                  <span className="tool-name">{p.manifest.name}</span>
+                  {p.statusBadge ? <span className="tool-badge">{p.statusBadge}</span> : null}
+                </button>
+                <Tooltip
+                  content={pinned ? "取消固定到左侧导航栏" : "固定到左侧导航栏"}
+                  relationship="label"
+                  withArrow
+                >
+                  <button
+                    type="button"
+                    className={`tool-pin-btn${pinned ? " pinned" : ""}`}
+                    aria-pressed={pinned}
+                    aria-label={pinned ? `取消固定${p.manifest.name}` : `将${p.manifest.name}固定到左侧导航栏`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTogglePin(pinId);
+                    }}
+                  >
+                    {pinned ? <Pin16Filled /> : <Pin16Regular />}
+                  </button>
+                </Tooltip>
+              </div>
+            );
+          })}
         </div>
       ) : null}
       {page === "plugins" ? (
-        <div className="settings-sub-content">
+        <div key="plugins" className={subMotionClass.trim() || undefined}>
           <PluginManagerPanel
             plugins={plugins}
             onOpenPlugin={(id) => openPage(`plugin:${id}`)}
@@ -170,22 +245,22 @@ export function Toolbox(props: {
         </div>
       ) : null}
       {page.startsWith("plugin:") ? (
-        <div className="settings-sub-content">
+        <div key={page} className={subMotionClass.trim() || undefined}>
           <PluginView pluginId={page.slice("plugin:".length)} theme={theme} />
         </div>
       ) : null}
       {page === "fetch" ? (
-        <div className="settings-sub-content">
+        <div key="fetch" className={subMotionClass.trim() || undefined}>
           <FetchPanel />
         </div>
       ) : null}
       {page === "share" ? (
-        <div ref={sharePanelRef} className="tool-panel settings-sub-content">
+        <div key="share" className={`tool-panel${subMotionClass}`}>
           <SharePanel settings={settings} onSettings={set} />
         </div>
       ) : null}
       {page === "mute" ? (
-        <div className="tool-panel settings-sub-content">
+        <div key="mute" className={`tool-panel${subMotionClass}`}>
           <p className="hint">以下开关默认关闭，静音作用于系统默认输出设备。</p>
           <section className="mute-group" aria-labelledby="smart-mute-title">
             <div className="mute-head">
@@ -238,7 +313,7 @@ export function Toolbox(props: {
       ) : null}
       {page === "campus" ? (
       <>
-      <div className="tool-panel settings-sub-content">
+      <div key="campus" className={`tool-panel${subMotionClass}`}>
         <Field label="登录规则设置">
           <Dropdown
             className="tool-select"

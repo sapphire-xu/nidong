@@ -277,6 +277,18 @@ pub struct AppSettings {
     /// 防社死 · 日程时间段内静音。
     #[serde(default)]
     pub smart_mute_agenda: bool,
+    /// 是否显示顶部悬浮岛（Linux Wayland 等环境可关闭，改用托盘与系统通知）。
+    #[serde(default = "default_true")]
+    pub show_island: bool,
+    /// 左侧导航栏是否收起为仅图标模式。
+    #[serde(default)]
+    pub nav_collapsed: bool,
+    /// 左侧导航栏顺序（内建页面 ID 与固定工具 `tool:...`）。
+    #[serde(default)]
+    pub nav_order: Vec<String>,
+    /// 从工具箱固定到左侧导航栏的功能 ID。
+    #[serde(default)]
+    pub nav_pins: Vec<String>,
 }
 
 impl Default for AppSettings {
@@ -311,6 +323,10 @@ impl Default for AppSettings {
             smart_mute_idle_minutes: default_smart_mute_idle_minutes(),
             smart_mute_class: false,
             smart_mute_agenda: false,
+            show_island: true,
+            nav_collapsed: false,
+            nav_order: Vec::new(),
+            nav_pins: Vec::new(),
         }
     }
 }
@@ -374,6 +390,9 @@ mod settings_tests {
         assert_eq!(s.smart_mute_idle_minutes, 60);
         assert!(!s.smart_mute_class);
         assert!(!s.smart_mute_agenda);
+        assert!(!s.nav_collapsed);
+        assert!(s.nav_order.is_empty());
+        assert!(s.nav_pins.is_empty());
     }
 }
 
